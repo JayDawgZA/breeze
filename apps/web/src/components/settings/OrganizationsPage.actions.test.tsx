@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import OrganizationsPage from './OrganizationsPage';
@@ -27,7 +27,7 @@ vi.mock('../../stores/orgStore', () => ({
   ),
 }));
 
-let mockJwtScope: 'system' | 'partner' | 'organization' | null = 'partner';
+let mockJwtScope: 'system' | 'partner' | 'organization' = 'partner';
 vi.mock('../../lib/authScope', () => ({
   useJwtClaims: () => ({
     status: 'resolved' as const,
@@ -42,33 +42,28 @@ void handleSessionExpired;
 const jsonResponse = (payload: unknown, ok = true, status = ok ? 200 : 500): Response =>
   ({ ok, status, statusText: ok ? 'OK' : 'ERROR', json: vi.fn().mockResolvedValue(payload) }) as unknown as Response;
 
-const ORG_ACTIVE = {
+const ALPHA = {
   id: 'aaaaaaaa-1111-4111-8111-111111111111',
   name: 'Alpha Ltd',
   status: 'active',
   deviceCount: 3,
   createdAt: '2026-01-01T00:00:00Z',
 };
-const ORG_TRIAL = {
+const BETA = {
   id: 'bbbbbbbb-2222-4222-8222-222222222222',
   name: 'Beta Ltd',
-  status: 'trial',
+  status: 'active',
   deviceCount: 5,
   createdAt: '2026-01-02T00:00:00Z',
 };
 
-let orgsState: Array<typeof ORG_ACTIVE> = [ORG_ACTIVE, ORG_TRIAL];
-
 function mockApi() {
   fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
-    const method = init?.method;
-
-    if (url.startsWith('/orgs/organizations?') && !method) {
-      return jsonResponse({ data: orgsState });
-    }
+    if (url.startsWith('/orgs/organizations?') && !init?.method) return jsonResponse({ data: [ALPHA, BETA] });
     if (url === '/orgs/partners/me') return jsonResponse({ settings: {} });
     if (url.startsWith('/orgs/sites?organizationId=')) return jsonResponse({ data: [] });
+    if (url.endsWith('/summary')) return jsonResponse({ orgId: ALPHA.id, sites: { count: 0 } });
     return jsonResponse({ data: [] });
   });
 }
@@ -79,8 +74,8 @@ async function flush() {
   });
 }
 
-async function selectOrg(org: typeof ORG_ACTIVE) {
-  fireEvent.click(screen.getByTestId(`org-row-${org.id}`));
+async function selectAlpha() {
+  fireEvent.click(screen.getByTestId(`org-row-${ALPHA.id}`));
   await flush();
 }
 
@@ -88,9 +83,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   fetchMock.mockReset();
   navigateTo.mockReset();
-  storeFetchOrganizations.mockClear();
   window.location.hash = '';
-  orgsState = [ORG_ACTIVE, ORG_TRIAL];
   mockJwtScope = 'partner';
 });
 
@@ -98,75 +91,62 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('OrganizationsPage — list rows link to the organization record page', () => {
-  it('renders a persistent org-open-record link with the record href', async () => {
+describe('OrganizationsPage — distilled detail-header actions', () => {
+  it('shows one primary (Open record), one secondary (Settings) and a More menu; archive and merge are not standalone buttons', async () => {
     mockApi();
     render(<OrganizationsPage />);
     await flush();
+    await selectAlpha();
 
-    const link = screen.getByTestId(`org-open-record-${ORG_ACTIVE.id}`);
-    expect(link).toHaveAttribute('href', `/organizations/${ORG_ACTIVE.id}`);
+    const panel = screen.getByTestId('org-detail-panel');
+    expect(within(panel).getByTestId('org-open-record')).toHaveTextContent('Open record');
+    expect(within(panel).getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'More actions' })).toHaveAttribute('aria-haspopup', 'menu');
+    expect(within(panel).queryByTestId('org-archive-open')).not.toBeInTheDocument();
+    expect(within(panel).queryByTestId('org-merge-open')).not.toBeInTheDocument();
+    // The panel's whole button inventory: primary, secondary, overflow, and
+    // the Sites section's own add action. Nothing else competes.
+    expect(
+      within(panel)
+        .getAllByRole('button')
+        .map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim()),
+    ).toEqual(['Open record', 'Settings', 'More actions', 'Add site']);
   });
 
-  it('the org name is the row select control; only the row-end link opens the record', async () => {
+  it('the More menu holds Archive and Merge for partner scope and opens the archive dialog', async () => {
     mockApi();
     render(<OrganizationsPage />);
     await flush();
+    await selectAlpha();
 
-    // The name is no longer a link: it selects the row (keyboard-reachable
-    // via the select button), and the record is reached through the
-    // persistent row-end link named after the org.
-    expect(screen.queryByRole('link', { name: ORG_ACTIVE.name })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${ORG_ACTIVE.name}`) }));
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    const items = screen.getAllByRole('menuitem');
+    expect(items.map((el) => el.textContent)).toEqual(['Archive organization', 'Merge into another organization']);
+
+    fireEvent.click(screen.getByTestId('org-archive-open'));
     await flush();
-
-    expect(screen.getByRole('heading', { level: 2, name: ORG_ACTIVE.name })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: `Open record for ${ORG_ACTIVE.name}` })).toHaveAttribute(
-      'href',
-      `/organizations/${ORG_ACTIVE.id}`,
-    );
-  });
-});
-
-describe('OrganizationsPage — status pill is exception-only in the main list', () => {
-  it('renders NO status pill for an active org row', async () => {
-    mockApi();
-    render(<OrganizationsPage />);
-    await flush();
-
-    const row = screen.getByTestId(`org-row-${ORG_ACTIVE.id}`);
-    expect(row).not.toHaveTextContent('Active');
+    expect(screen.getByRole('dialog', { name: 'Archive organization' })).toBeInTheDocument();
   });
 
-  it('renders the status pill for a trial org row', async () => {
+  it('the More menu omits Merge outside partner scope', async () => {
+    mockJwtScope = 'organization';
     mockApi();
     render(<OrganizationsPage />);
     await flush();
+    await selectAlpha();
 
-    const row = screen.getByTestId(`org-row-${ORG_TRIAL.id}`);
-    expect(row).toHaveTextContent('Trial');
-  });
-});
-
-describe('OrganizationsPage — detail-pane header exposes Open record', () => {
-  it('renders org-open-record in the detail header once an org is selected', async () => {
-    mockApi();
-    render(<OrganizationsPage />);
-    await flush();
-
-    await selectOrg(ORG_ACTIVE);
-
-    expect(screen.getByTestId('org-open-record')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Archive organization']);
   });
 
-  it('clicking the detail-pane Open record button navigates to the record page', async () => {
+  it('list rows expose Settings and Open record only; archive lives in the header menu', async () => {
     mockApi();
     render(<OrganizationsPage />);
     await flush();
 
-    await selectOrg(ORG_ACTIVE);
-    fireEvent.click(screen.getByTestId('org-open-record'));
-
-    expect(navigateTo).toHaveBeenCalledWith(`/organizations/${ORG_ACTIVE.id}`);
+    const row = screen.getByTestId(`org-row-${ALPHA.id}`);
+    expect(within(row).getByRole('button', { name: 'Settings for Alpha Ltd' })).toBeInTheDocument();
+    expect(within(row).getByRole('link', { name: 'Open record for Alpha Ltd' })).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /archive/i })).not.toBeInTheDocument();
   });
 });
