@@ -78,6 +78,7 @@ export const WORKER_READINESS_MANIFEST: readonly WorkerInitializerClassification
   consumers('reliabilityRetention'),
   consumers('processSampleRetention'),
   consumers('deviceMetricsRetention'),
+  consumers('m365SyncRetention'),
   consumers('serviceProcessCheckRetention'),
   consumers('changeLogRetention'),
   consumers('oauthCleanup'),
