@@ -65,6 +65,7 @@ vi.mock('./ticketPush', async () => {
 });
 vi.mock('./mlFeedbackEmitters', () => ({ emitTicketTriageFeedback: emitTriageFeedbackMock }));
 vi.mock('./auditService', () => ({ createAuditLogAsync: auditMock }));
+
 vi.mock('./ticketNumbers', () => ({ allocateInternalTicketNumber: allocateMock }));
 // Task 13 (#3776): the locked currency guard is unit-tested on its own
 // (ticketMoveCurrencyGuard.test.ts); here it is a mock so moveTicketOrg's
@@ -4273,5 +4274,85 @@ describe('postProposalNote (#4211)', () => {
 
     await expect(postProposalNote(TICKET_ID, RUN_ID, 'Proposed summary', { userId: USER_ID, name: 'Tech' }))
       .rejects.toThrow('connection reset');
+  });
+});
+
+describe('AI time-entry proposal claim on the ticket outbox (#4177, W04)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    valuesMock.mockClear();
+    setMock.mockClear();
+  });
+
+  /** The ticket_outbox row payload written by the call under test, by event type. */
+  function outboxPayload(eventType: string): Record<string, unknown> | undefined {
+    const row = valuesMock.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .find((v) => v && v.eventType === eventType && 'payload' in v);
+    return row?.payload as Record<string, unknown> | undefined;
+  }
+
+  const ticket = { id: 't-1', orgId: 'o-1', partnerId: 'p-1', status: 'open', firstResponseAt: new Date() };
+  const replyDraft = { id: 'draft-1', ticketId: 't-1', kind: 'reply', state: 'active', content: 'Draft body', runId: 'run-1' };
+
+  it('sendTicketDraft writes the aiDraft claim (draft, run, trigger) into the ticket.commented outbox payload', async () => {
+    dbMocks.selectResult.mockResolvedValueOnce([ticket]).mockResolvedValueOnce([replyDraft]);
+    dbMocks.insertReturning.mockResolvedValue([{ id: 'c-1' }]);
+    dbMocks.updateReturning.mockResolvedValue([{ id: 'draft-1' }]);
+
+    await sendTicketDraft('t-1', 'draft-1', undefined, actor);
+
+    expect(outboxPayload('ticket.commented')).toEqual({
+      commentId: 'c-1',
+      isPublic: true,
+      aiDraft: { draftId: 'draft-1', runId: 'run-1', trigger: 'draft_sent' },
+    });
+  });
+
+  it('sendTicketDraft writes no claim for a draft with no run', async () => {
+    dbMocks.selectResult.mockResolvedValueOnce([ticket]).mockResolvedValueOnce([{ ...replyDraft, runId: null }]);
+    dbMocks.insertReturning.mockResolvedValue([{ id: 'c-1' }]);
+    dbMocks.updateReturning.mockResolvedValue([{ id: 'draft-1' }]);
+
+    await sendTicketDraft('t-1', 'draft-1', undefined, actor);
+
+    expect(outboxPayload('ticket.commented')).toEqual({ commentId: 'c-1', isPublic: true });
+  });
+
+  it('resolving with an aiDraftId writes the resolved_with_ai_note claim into the ticket.status_changed outbox payload', async () => {
+    dbMocks.selectResult
+      .mockResolvedValueOnce([{ id: 't-1', orgId: 'o-1', partnerId: 'p-1', status: 'open', resolvedAt: null }])
+      .mockResolvedValueOnce([{ id: 'draft-1', ticketId: 't-1', kind: 'resolution_note', state: 'active', content: 'AI note', runId: 'run-9' }]);
+    dbMocks.updateReturning
+      .mockResolvedValueOnce([{ id: 't-1', status: 'resolved' }])
+      .mockResolvedValueOnce([{ id: 'draft-1' }]);
+    dbMocks.insertReturning.mockResolvedValue([{ id: 'c-1' }]);
+
+    await changeTicketStatus('t-1', { status: 'resolved' }, { aiDraftId: 'draft-1' }, actor);
+
+    expect(outboxPayload('ticket.status_changed')).toEqual({
+      from: 'open',
+      to: 'resolved',
+      aiDraft: { draftId: 'draft-1', runId: 'run-9', trigger: 'resolved_with_ai_note' },
+    });
+  });
+
+  it('resolving without an aiDraftId writes the unchanged status_changed payload', async () => {
+    dbMocks.selectResult.mockResolvedValueOnce([{ id: 't-1', orgId: 'o-1', partnerId: 'p-1', status: 'open', resolvedAt: null }]);
+    dbMocks.updateReturning.mockResolvedValueOnce([{ id: 't-1', status: 'resolved' }]);
+    dbMocks.insertReturning.mockResolvedValue([{ id: 'c-1' }]);
+
+    await changeTicketStatus('t-1', { status: 'resolved' }, { resolutionNote: 'Replaced toner' }, actor);
+
+    expect(outboxPayload('ticket.status_changed')).toEqual({ from: 'open', to: 'resolved' });
+  });
+
+  it('ticketService never imports the action-intent graph (worker closure contract)', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const src = fs.readFileSync(path.join(__dirname, 'ticketService.ts'), 'utf8');
+    expect(src).not.toMatch(/import\(['"]\.\/aiTimeEntryProposal['"]\)/);
+    expect(src).not.toMatch(/^import (?!type ).*from ['"]\.\/aiTimeEntryProposal['"]/m);
+    expect(src).not.toMatch(/from ['"]\.\/actionIntents\/intentService['"]/);
   });
 });
