@@ -2013,6 +2013,9 @@
           },
           "viewApproval": "Revisar em Aprovações"
         },
+        "progress": {
+          "title": "Progresso"
+        },
         "ledger": {
           "title": "Execuções de ferramentas",
           "empty": "Nenhuma execução de ferramenta registrada.",

@@ -413,7 +413,12 @@ export function buildRunTrace(
   // for every run that produced no narrative artifact. Defaults null so every
   // existing caller is unchanged.
   narrativeDelivery: AiAgentRunNarrativeDeliveryDto | null = null,
-): AiAgentRunDetailDto {
+  // `progress` is intentionally NOT a parameter here: it is read from the
+  // live Redis ring (`readRunProgress`, W03) by the route, not assembled
+  // from persisted run state like everything else this function builds.
+  // The route merges it in after calling this function (see
+  // routes/aiAgents.ts GET /runs/:runId).
+): Omit<AiAgentRunDetailDto, 'progress'> {
   const outcome = run.outcome as Partial<AgentRunOutcome>;
   return {
     schemaVersion: AI_AGENT_RUN_DTO_SCHEMA_VERSION,
