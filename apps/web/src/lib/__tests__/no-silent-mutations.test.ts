@@ -312,6 +312,11 @@ const TARGET_GLOBS = [
   // believing responses resumed and the recurrence counter cleared when they
   // did not.
   'src/components/monitoring/MonitorActivityTab.tsx',
+  // Monitor editor + deploy dialog (sweep G1-4): save/delete already routed
+  // through runAction, but attach/detach were bare fetchWithAuth calls — a
+  // failed detach was silent and a successful one gave no feedback.
+  'src/components/monitoring/MonitorEditor.tsx',
+  'src/components/monitoring/DeployMonitorDialog.tsx',
 ];
 
 const absoluteFiles: string[] = TARGET_GLOBS.map((rel) => resolve(WEB_ROOT, '..', rel));
@@ -649,7 +654,9 @@ describe('no silent mutations in targeted set', () => {
     // and the per-org external-processing switch), so the count is 133.
     // Tool catalog W01 PR C (#5216) adds five: the toolSources API client and
     // its four components, so the count is now 138.
-    expect(absoluteFiles.length).toBe(138);
+    // Sweep G1-4 moves monitor attach/detach onto runAction, adding
+    // MonitorEditor.tsx and DeployMonitorDialog.tsx (+2 on main's 138).
+    expect(absoluteFiles.length).toBe(140);
     for (const f of absoluteFiles) {
       expect(() => statSync(f)).not.toThrow();
     }
