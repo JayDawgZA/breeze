@@ -27,6 +27,8 @@ export const MANAGED_EVIDENCE_REPORT_TYPES = [
   'endpoint_management_review',
   // #5784 W04 — the vulnerability detail artifact.
   'vulnerability_management',
+  // #5784 W06 — the identity and access review (interactive sign-ins).
+  'identity_access_review',
 ] as const satisfies readonly string[];
 export type ManagedEvidenceReportType = (typeof MANAGED_EVIDENCE_REPORT_TYPES)[number];
 

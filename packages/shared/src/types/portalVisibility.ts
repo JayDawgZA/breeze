@@ -262,7 +262,11 @@ export interface PortalRunDto {
     // #5784 W03 — managed evidence; listed after delivery, never generated here.
     | 'endpoint_management_review'
     // #5784 W04 — managed evidence, visible only once delivered.
-    | 'vulnerability_management';
+    | 'vulnerability_management'
+    // #5784 W06 — managed evidence, same rule. `portalRunListPredicate` has no
+    // type filter, so an unwidened union here is a type lie the compiler cannot
+    // see: the value comes from the database.
+    | 'identity_access_review';
   name: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   startedAt: string | null;

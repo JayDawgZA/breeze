@@ -317,6 +317,7 @@
         "executive_summary": "Yönetici Özeti",
         "hardware_lifecycle": "Donanım Yaşam Döngüsü",
         "vulnerability_management": "Güvenlik Açığı Yönetimi",
+        "identity_access_review": "Kimlik ve Erişim İncelemesi",
         "performance": "Performans Raporu",
         "security_compliance_posture": "Güvenlik ve Uyumluluk Duruşu",
         "software_inventory": "Yazılım Envanteri",
@@ -350,6 +351,17 @@
         "noncompliant": "Uyumlu değil",
         "notMeasured": "Yok",
         "staleEnrolments": "Eskimiş kayıtlar"
+      },
+      "identityAccess": {
+        "notMeasured": "Yok",
+        "coverage": "Bu raporun sınırları",
+        "signins": "Etkileşimli oturum açmalar",
+        "distinctUsers": "Oturum açan hesaplar",
+        "failures": "Başarısız oturum açmalar",
+        "admins": "Yönetici rolü olan hesaplar",
+        "adminsWithoutMfa": "MFA’sı olmayan yöneticiler",
+        "mfaUnknown": "MFA durumu bilinmiyor",
+        "dormant": "Atıl hesaplar"
       }
     },
     "reportsList": {
@@ -399,6 +411,7 @@
         "executive_summary": "Yönetici Özeti",
         "hardware_lifecycle": "Donanım Yaşam Döngüsü",
         "vulnerability_management": "Güvenlik Açığı Yönetimi",
+        "identity_access_review": "Kimlik ve Erişim İncelemesi",
         "performance": "Performans Raporu",
         "security_compliance_posture": "Güvenlik ve Uyumluluk Duruşu",
         "software_inventory": "Yazılım Envanteri",
@@ -912,6 +925,7 @@
         "executive_summary": "Yönetici Özeti",
         "hardware_lifecycle": "Donanım Yaşam Döngüsü",
         "vulnerability_management": "Güvenlik Açığı Yönetimi",
+        "identity_access_review": "Kimlik ve Erişim İncelemesi",
         "patches": "Yamalar",
         "performance": "Performans Raporu",
         "security_compliance_posture": "Güvenlik ve Uyumluluk Duruşu",
@@ -956,6 +970,10 @@
           "description": "Önem derecesine göre açık bulgular; etkin olarak sömürülenler (KEV) ve EPSS değeri yüksek olanlar ayrıca belirtilir, önce giderilecek yamalanabilir bulgular ve sonraki dönemde süresi dolan kabul edilmiş risk istisnaları listelenir.",
           "name": "Güvenlik Açığı Yönetimi Raporu"
         },
+        "identity_access_review": {
+          "name": "Kimlik ve Erişim İncelemesi",
+          "description": "Bir döneme ait etkileşimli Microsoft 365 oturum açmaları; kimlik envanteri, atıl hesaplar, koşullu erişim durumu ve uzaktan erişim istemcilerinin varlığıyla birlikte — gerçekte kapsanan zaman aralığı raporun kendisinde belirtilir."
+        },
         "security_compliance_posture": {
           "description": "Sigortaya/incelemeye hazır kanıtlar: EDR kapsamı, şifreleme, güvenlik duvarı, yama uygulama, güvenlik açıkları, ayrıcalıklı erişim ve yüzde uygulanan toplamalarla güvenlik entegrasyonları.",
           "name": "Güvenlik ve Uyumluluk Duruşu (Sigorta)"
@@ -991,6 +1009,18 @@
       "staleEnrolmentDaysHelp": "Bu kadar gündür Intune ile iletişim kurmayan bir cihaz eskimiş kayıt sayılır. Ölçüt, rapor dönemi değil Intune eşitleme sıklığıdır.",
       "trendDays": "Uyumluluk eğilimi penceresi (gün)",
       "trendDaysHelp": "Günlük uyumluluk eğiliminin Microsoft 365 durum özetlerinde ne kadar geriye gittiği."
+    },
+    "identityAccessOptions": {
+      "cancel": "İptal",
+      "createReport": "Rapor oluştur",
+      "orgWideNote": "Bu rapor kuruluşun tamamını kapsar. Microsoft 365 kimlik verisinde lokasyon boyutu yoktur; bu nedenle belirli lokasyonlara daraltılamaz ve yalnızca belirli lokasyonlara yetkili bir hesap bu raporu hiç üretemez.",
+      "dormantDays": "Hesabı atıl say (gün)",
+      "dormantDaysHelp": "Bu kadar gün içinde kayıtlı başarılı oturum açması bulunmayan etkin hesaplar listelenir. Hiç oturum açarken görülmemiş bir hesap “hiç gözlenmedi” olarak geçer; bu, uzun bir aradan farklıdır.",
+      "homeCountries": "Beklenen oturum açma ülkeleri (ISO kodları)",
+      "homeCountriesHelp": "Virgülle ayrılmış iki harfli ülke kodları; örneğin US, CA. Listenin dışından yapılan oturum açmalar sayılır. Alan boş bırakılırsa bölüm “yapılandırılmadı” der, asla “yurt dışından oturum açma yok” demez.",
+      "adminDetail": "Yönetici oturum açma ayrıntısını dahil et",
+      "adminDetailHelp": "Yönetici rolü taşıyan bir hesabın her etkileşimli oturum açmasını, geldiği adres dahil listeler. Denetçinin ilk okuduğu bölüm budur.",
+      "coverageNote": "Rapor yalnızca etkileşimli oturum açmaları kapsar ve gerçekte kapsadığı aralığı yazar. Microsoft oturum açma günlüklerini yaklaşık 30 gün saklar ve bunları vermek için Entra ID P1 veya P2 lisansı ister; bu nedenle toplama açıldıktan sonraki ilk rapor eksiktir ve bunu açıkça belirtir."
     }
   }
 }

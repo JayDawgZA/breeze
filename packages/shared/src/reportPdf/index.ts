@@ -6,3 +6,5 @@ export { renderEndpointManagementReport } from './endpointManagementPdf';
 export type { EndpointManagementPdfOpts } from './endpointManagementPdf';
 export { renderVulnerabilityManagementReport } from './vulnerabilityManagementPdf';
 export type { VulnerabilityManagementPdfOpts } from './vulnerabilityManagementPdf';
+export { renderIdentityAccessReport } from './identityAccessPdf';
+export type { IdentityAccessPdfOpts } from './identityAccessPdf';

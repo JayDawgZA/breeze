@@ -70,7 +70,13 @@ export type ReportType =
   // security_compliance_posture keeps its single control line; this is the
   // findings, exceptions and remediation ranking a vulnerability-management
   // deliverable needs. See services/vulnerabilityManagementReport.ts.
-  | 'vulnerability_management';
+  | 'vulnerability_management'
+  // #5784 W06. Service-plan evidence: interactive sign-in review, identity
+  // inventory, conditional access posture and remote-access client presence.
+  // Org-wide by construction — M365 identity has no site dimension — so a
+  // restricted authority gets the zero-safe shape, never a silently org-wide
+  // view. See services/identityAccessReport.ts.
+  | 'identity_access_review';
 
 /**
  * Thrown by every generation entry point for a `ReportType` whose artifact is
@@ -932,6 +938,14 @@ async function dispatchReportGeneration(
       const { generateVulnerabilityManagementReport } = await import('./vulnerabilityManagementReport');
       return generateVulnerabilityManagementReport(orgId, config, authority, evidence);
     }
+    // #5784 W06. Same managed-evidence shape as W02 above: `authority` is passed
+    // as-is because a system authority legitimately reaches this arm, and the
+    // generator itself decides what a RESTRICTED authority gets (nothing —
+    // M365 identity has no site dimension, OD-8 = A).
+    case 'identity_access_review': {
+      const { generateIdentityAccessReport } = await import('./identityAccessReport');
+      return generateIdentityAccessReport(orgId, config, authority, evidence);
+    }
     default: {
       const exhaustive: never = type;
       throw new Error(`Invalid report type: ${String(exhaustive)}`);
@@ -1002,6 +1016,11 @@ function zeroSafeReport(type: ReportType, orgId: string): ReportResult {
     // #5784 W02 — NOT stored-artifact-only: a restricted authority with zero
     // sites gets an empty-but-shaped result rather than a throw.
     case 'threat_detection_review':
+    // #5784 W06 — NOT stored-artifact-only either. This arm is load-bearing for
+    // identity_access_review in a way it is not for the types above: the
+    // generator routes EVERY restricted authority into the same empty-but-shaped
+    // result, not only the zero-sites case.
+    case 'identity_access_review':
       return emptyRowsReport();
     // #5784 W03 — generated on demand, so a restricted-empty authority gets a
     // zero-safe shape rather than a stored-artifact refusal. It needs its OWN

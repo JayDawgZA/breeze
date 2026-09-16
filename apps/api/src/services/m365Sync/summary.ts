@@ -61,20 +61,30 @@ function isUnlicensed(domain: M365SyncDomain, sources: unknown): boolean {
 }
 
 /**
- * Raw per-domain freshness, as a report generator needs it (#5784 W03).
+ * Raw per-domain freshness, as a report generator needs it (#5784 W03/W06).
+ *
+ * Why not reuse `loadSyncSummary`: it returns `null` outright when the sync flag
+ * is off and shapes its output for the UI card, iterating ALL domains. A report
+ * generator needs the freshness of the two or three domains it actually reads,
+ * and needs to tell "sync disabled" from "never ran" so its data-gap line can
+ * say which — so the flag check stays with the caller here.
  *
  * `asOf` is `last_complete_snapshot_at` and NOTHING else. `last_success_at`
  * also advances for a `partial` outcome — a run that succeeded without
  * enumerating the tenant — so quoting it would claim a freshness the data does
- * not have. `sources` is returned verbatim so a caller can name the actual gap
- * (`needs_consent`, `throttled`) instead of printing zeros for an unmeasured
- * population.
+ * not have. `sources` is returned verbatim (normalized to a string map) so a
+ * caller can name the actual gap (`needs_consent`, `throttled`) instead of
+ * printing zeros for an unmeasured population.
+ *
+ * Read on the REQUEST's own DB context: shape-1 RLS is the tenant boundary, and
+ * the statement is also keyed on the org.
  */
 export interface DomainFreshness {
   asOf: string | null;
   lastStatus: string | null;
   truncated: boolean;
   sources: Record<string, string> | null;
+  /** The domain's OWN primary source came back 'unlicensed'. */
   unlicensed: boolean;
 }
 
@@ -126,7 +136,7 @@ function sourceMap(value: unknown): Record<string, string> | null {
 }
 
 /**
- * Per-domain freshness for the domains a caller actually reads (#5784 W03).
+ * Per-domain freshness for the domains a caller actually reads (#5784 W03/W06).
  *
  * TOTAL over `domains`: a domain with no state row comes back as
  * `asOf: null`, never as a missing key, so a caller cannot mistake

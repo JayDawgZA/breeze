@@ -52,7 +52,10 @@ export type ReportType =
   // form), never representable by the freeform builder. The list label comes
   // from `reports.reportsList.reportTypes.vulnerability_management`, resolved
   // dynamically by getReportTypeLabel — no hardcoded map to update.
-  | 'vulnerability_management';
+  | 'vulnerability_management'
+  // #5784 W06. No hardcoded label map: getReportTypeLabel resolves
+  // reports.reportsList.reportTypes.<type> from the locale files.
+  | 'identity_access_review';
 
 /**
  * Report types the API owns end to end: the AI schedule creates the definition,

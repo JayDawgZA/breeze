@@ -317,6 +317,7 @@
         "executive_summary": "Zusammenfassung",
         "hardware_lifecycle": "Hardware-Lebenszyklus",
         "vulnerability_management": "Schwachstellenmanagement",
+        "identity_access_review": "Überprüfung von Identität und Zugriff",
         "performance": "Leistungsbericht",
         "security_compliance_posture": "Sicherheits- und Compliance-Status",
         "software_inventory": "Software-Inventar",
@@ -350,6 +351,17 @@
         "noncompliant": "Nicht konform",
         "notMeasured": "k. A.",
         "staleEnrolments": "Veraltete Registrierungen"
+      },
+      "identityAccess": {
+        "notMeasured": "k. A.",
+        "coverage": "Grenzen dieses Berichts",
+        "signins": "Interaktive Anmeldungen",
+        "distinctUsers": "Angemeldete Konten",
+        "failures": "Fehlgeschlagene Anmeldungen",
+        "admins": "Konten mit Administratorrolle",
+        "adminsWithoutMfa": "Administratoren ohne MFA",
+        "mfaUnknown": "MFA-Status unbekannt",
+        "dormant": "Ruhende Konten"
       }
     },
     "reportsList": {
@@ -399,6 +411,7 @@
         "executive_summary": "Zusammenfassung",
         "hardware_lifecycle": "Hardware-Lebenszyklus",
         "vulnerability_management": "Schwachstellenmanagement",
+        "identity_access_review": "Überprüfung von Identität und Zugriff",
         "performance": "Leistungsbericht",
         "security_compliance_posture": "Sicherheits- und Compliance-Status",
         "software_inventory": "Software-Inventar",
@@ -912,6 +925,7 @@
         "executive_summary": "Zusammenfassung",
         "hardware_lifecycle": "Hardware-Lebenszyklus",
         "vulnerability_management": "Schwachstellenmanagement",
+        "identity_access_review": "Überprüfung von Identität und Zugriff",
         "patches": "Patches",
         "performance": "Leistungsbericht",
         "security_compliance_posture": "Sicherheits- und Compliance-Status",
@@ -956,6 +970,10 @@
           "description": "Offene Befunde nach Schweregrad, mit aktiv ausgenutzten (KEV) und Befunden mit hohem EPSS-Wert getrennt ausgewiesen, den zuerst zu behebenden patchbaren Befunden und den Ausnahmen, deren Risikoakzeptanz im nächsten Zeitraum ausläuft.",
           "name": "Schwachstellenmanagement-Bericht"
         },
+        "identity_access_review": {
+          "name": "Überprüfung von Identität und Zugriff",
+          "description": "Interaktive Anmeldungen bei Microsoft 365 in einem Zeitraum, mit Identitätsbestand, ruhenden Konten, Status des bedingten Zugriffs und vorhandenen Fernzugriffs-Clients — samt tatsächlich abgedecktem Zeitfenster direkt auf dem Bericht."
+        },
         "security_compliance_posture": {
           "description": "Versicherungs-/prüfbereite Beweise: EDR-Abdeckung, Verschlüsselung, Firewall, Patching, Schwachstellen, privilegierter Zugriff und Sicherheitsintegrationen mit prozentual implementierten Rollups.",
           "name": "Sicherheits- und Compliance-Status (Versicherung)"
@@ -991,6 +1009,18 @@
       "staleEnrolmentDaysHelp": "Ein Gerät, das sich so viele Tage nicht bei Intune gemeldet hat, gilt als veraltete Registrierung. Maßstab ist der Intune-Synchronisierungstakt, nicht der Berichtszeitraum.",
       "trendDays": "Zeitraum des Compliance-Verlaufs (Tage)",
       "trendDaysHelp": "Wie weit der tägliche Compliance-Verlauf in die Statusaufstellungen von Microsoft 365 zurückreicht."
+    },
+    "identityAccessOptions": {
+      "cancel": "Abbrechen",
+      "createReport": "Bericht erstellen",
+      "orgWideNote": "Dieser Bericht umfasst die gesamte Organisation. Die Identitätsdaten aus Microsoft 365 kennen keine Standortdimension, lassen sich also nicht auf einzelne Standorte eingrenzen — und ein auf bestimmte Standorte beschränktes Konto kann ihn gar nicht ausführen.",
+      "dormantDays": "Konto gilt als ruhend nach (Tagen)",
+      "dormantDaysHelp": "Aktive Konten ohne erfasste erfolgreiche Anmeldung innerhalb dieser Anzahl von Tagen werden aufgeführt. Ein nie bei einer Anmeldung beobachtetes Konto erscheint als „nie beobachtet“ — das ist etwas anderes als eine lange Pause.",
+      "homeCountries": "Erwartete Anmeldeländer (ISO-Codes)",
+      "homeCountriesHelp": "Zweibuchstabige Ländercodes, durch Komma getrennt — zum Beispiel US, CA. Anmeldungen außerhalb der Liste werden gezählt. Bleibt das Feld leer, lautet der Abschnitt „nicht konfiguriert“ und nie „keine Anmeldungen aus dem Ausland“.",
+      "adminDetail": "Detaillierte Administrator-Anmeldungen einbeziehen",
+      "adminDetailHelp": "Listet jede interaktive Anmeldung eines Kontos mit Administratorrolle auf, einschließlich der Herkunftsadresse. Diesen Abschnitt liest eine Prüferin zuerst.",
+      "coverageNote": "Der Bericht erfasst ausschließlich interaktive Anmeldungen und nennt das tatsächlich abgedeckte Zeitfenster. Microsoft bewahrt Anmeldeprotokolle rund 30 Tage auf und gibt sie nur mit einer Lizenz vom Typ Entra ID P1 oder P2 heraus; der erste Bericht nach Aktivierung der Erfassung ist daher unvollständig und weist das aus."
     }
   }
 }

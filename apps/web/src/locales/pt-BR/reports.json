@@ -317,6 +317,7 @@
         "executive_summary": "Resumo Executivo",
         "hardware_lifecycle": "Ciclo de vida do hardware",
         "vulnerability_management": "Gestão de vulnerabilidades",
+        "identity_access_review": "Revisão de identidade e acesso",
         "performance": "Relatório de Desempenho",
         "security_compliance_posture": "Postura de Seguranca e Conformidade",
         "software_inventory": "Inventario de Software",
@@ -350,6 +351,17 @@
         "noncompliant": "Fora de conformidade",
         "notMeasured": "N/D",
         "staleEnrolments": "Inscrições desatualizadas"
+      },
+      "identityAccess": {
+        "notMeasured": "N/D",
+        "coverage": "Limites deste relatório",
+        "signins": "Logins interativos",
+        "distinctUsers": "Contas que fizeram login",
+        "failures": "Logins que falharam",
+        "admins": "Contas com papel de administrador",
+        "adminsWithoutMfa": "Administradores sem MFA",
+        "mfaUnknown": "Estado de MFA desconhecido",
+        "dormant": "Contas ociosas"
       }
     },
     "reportsList": {
@@ -399,6 +411,7 @@
         "executive_summary": "Resumo Executivo",
         "hardware_lifecycle": "Ciclo de vida do hardware",
         "vulnerability_management": "Gestão de vulnerabilidades",
+        "identity_access_review": "Revisão de identidade e acesso",
         "performance": "Relatório de Desempenho",
         "security_compliance_posture": "Postura de Seguranca e Conformidade",
         "software_inventory": "Inventario de Software",
@@ -912,6 +925,7 @@
         "executive_summary": "Resumo Executivo",
         "hardware_lifecycle": "Ciclo de vida do hardware",
         "vulnerability_management": "Gestão de vulnerabilidades",
+        "identity_access_review": "Revisão de identidade e acesso",
         "patches": "Patches",
         "performance": "Relatório de Desempenho",
         "security_compliance_posture": "Postura de Seguranca e Conformidade",
@@ -956,6 +970,10 @@
           "description": "Achados abertos por severidade, com os explorados ativamente (KEV) e os de EPSS alto destacados separadamente, os achados com correção disponível a tratar primeiro e as exceções de risco aceito que vencem no próximo período.",
           "name": "Relatório de gestão de vulnerabilidades"
         },
+        "identity_access_review": {
+          "name": "Revisão de identidade e acesso",
+          "description": "Os logins interativos do Microsoft 365 em um período, com o inventário de identidades, as contas ociosas, a postura de acesso condicional e a presença de clientes de acesso remoto — e com a janela realmente coberta declarada no próprio relatório."
+        },
         "security_compliance_posture": {
           "description": "Evidências prontas para seguro/vetting: cobertura de EDR, criptografia, firewall, patches, vulnerabilidades, acesso privilegiado e integrações de segurança com consolidações percentuais de implementação.",
           "name": "Postura de Seguranca e Conformidade (Seguro)"
@@ -991,6 +1009,18 @@
       "staleEnrolmentDaysHelp": "Um dispositivo que não se comunica com o Intune por esta quantidade de dias conta como inscrição desatualizada. A medida é feita pela cadência de sincronização do Intune, e não pelo período do relatório.",
       "trendDays": "Janela da tendência de conformidade (dias)",
       "trendDaysHelp": "Até onde a tendência diária de conformidade recua nos resumos de postura do Microsoft 365."
+    },
+    "identityAccessOptions": {
+      "cancel": "Cancelar",
+      "createReport": "Criar relatório",
+      "orgWideNote": "Este relatório abrange toda a organização. Os dados de identidade do Microsoft 365 não têm dimensão de site, portanto não podem ser restringidos a sites específicos, e uma conta limitada a certos sites não consegue gerá-lo.",
+      "dormantDays": "Considerar uma conta ociosa após (dias)",
+      "dormantDaysHelp": "São listadas as contas habilitadas sem nenhum login bem-sucedido registrado nesse número de dias. Uma conta nunca vista fazendo login aparece como “nunca observada”, o que não é o mesmo que um intervalo longo.",
+      "homeCountries": "Países de login esperados (códigos ISO)",
+      "homeCountriesHelp": "Códigos de país de duas letras separados por vírgulas, por exemplo US, CA. Logins fora da lista são contados. Se o campo ficar vazio, a seção diz “não configurado”, nunca “nenhum login do exterior”.",
+      "adminDetail": "Incluir o detalhamento de logins de administradores",
+      "adminDetailHelp": "Lista cada login interativo de uma conta com papel de administrador, incluindo o endereço de origem. É a seção que um auditor lê primeiro.",
+      "coverageNote": "O relatório cobre apenas logins interativos e imprime a janela que realmente cobre. A Microsoft mantém os registros de login por cerca de 30 dias e exige uma licença Entra ID P1 ou P2 para liberá-los, de modo que o primeiro relatório após ativar a coleta é parcial e diz isso."
     }
   }
 }

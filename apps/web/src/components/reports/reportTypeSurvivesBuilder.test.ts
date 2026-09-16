@@ -46,5 +46,8 @@ describe('reportTypeSurvivesBuilder', () => {
     // vulnerability_management → compliance: curated template with its own
     // options form (severity floor, top-N, exceptions), #5784 W04.
     expect(reportTypeSurvivesBuilder('vulnerability_management')).toBe(false);
+    // identity_access_review → devices (#5784 W06): curated type with its own
+    // options form; the builder would downgrade it to a plain devices report.
+    expect(reportTypeSurvivesBuilder('identity_access_review')).toBe(false);
   });
 });

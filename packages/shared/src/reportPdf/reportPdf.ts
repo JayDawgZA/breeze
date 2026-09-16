@@ -5,6 +5,7 @@ import type { ExecutiveSummary } from '../types/executiveSummaryReport';
 import type { HardwareLifecycleSummary } from '../types/hardwareLifecycleReport';
 import { renderHardwareLifecycleReport } from './hardwareLifecyclePdf';
 import type { ThreatDetectionSummary } from '../types/threatDetectionReport';
+import type { IdentityAccessSummary } from '../types/identityAccessReport';
 // Namespace import, not a named one: the arm below must be observable by a
 // `vi.spyOn(threat, 'renderThreatDetectionReport')` in
 // reportPdf.threatDetection.test.ts. A type with no arm falls silently through
@@ -14,6 +15,7 @@ import type { EndpointManagementSummary } from '../types/endpointManagementRepor
 import { renderEndpointManagementReport } from './endpointManagementPdf';
 import type { VulnerabilityManagementSummary } from '../types/vulnerabilityManagementReport';
 import { renderVulnerabilityManagementReport } from './vulnerabilityManagementPdf';
+import * as identityAccessPdf from './identityAccessPdf';
 import {
   NARRATIVE_BULLET_MAX_CHARS,
   NARRATIVE_HEADLINE_MAX_CHARS,
@@ -150,7 +152,7 @@ export type BuildOpts = {
   generatedAt: string;
   /** IANA timezone for formatting ISO date cells in generic tables. */
   timezone: string;
-  summary?: PostureSummary | ExecutiveSummary | OrgNarrativeReportSummary | FleetDesignReportSummary | HardwareLifecycleSummary | ThreatDetectionSummary | EndpointManagementSummary | VulnerabilityManagementSummary;
+  summary?: PostureSummary | ExecutiveSummary | OrgNarrativeReportSummary | FleetDesignReportSummary | HardwareLifecycleSummary | ThreatDetectionSummary | EndpointManagementSummary | VulnerabilityManagementSummary | IdentityAccessSummary;
   /** Slim baseline from the previous completed run, when the caller supplied
    * one (report_runs.result.previous) — drives the scorecard trend chip and
    * its "since <date>" label. */
@@ -177,6 +179,7 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   ai_org_narrative: 'Weekly AI Operations Narrative',
   ai_agent_impact: 'AI Agent Impact',
   ai_fleet_design: 'Fleet Design',
+  identity_access_review: 'Identity & Access Review',
   hardware_lifecycle: 'Hardware Lifecycle',
   threat_detection_review: 'Threat Detection Review',
   endpoint_management_review: 'Endpoint Management Review',
@@ -2104,6 +2107,45 @@ function buildReportPdfWithPalette(rows: unknown[], opts: BuildOpts): jsPDF {
     renderVulnerabilityManagementReport(
       doc,
       opts.summary as VulnerabilityManagementSummary,
+      {
+        generatedAt: opts.generatedAt,
+        partnerName: opts.branding?.name ?? null,
+        contactEmail: opts.branding?.contactEmail ?? null,
+        contactName: opts.branding?.contactName ?? null,
+        previous: opts.previous,
+      },
+      {
+        C,
+        PAGE,
+        drawHeaderBand: (d) => drawHeaderBand(d, opts),
+        drawFooter: (d) => drawFooter(d, opts),
+        drawTitleBlock,
+        drawSectionHeading,
+      },
+    );
+  } else if (
+    opts.reportType === 'identity_access_review'
+    && opts.summary
+    // #5784 W06. `!= null` FIRST, for the same reason as the W02 arm above:
+    // `typeof null === 'object'`, so a snapshot carrying an explicit
+    // `coverage: null` would otherwise enter the arm and render the reassuring
+    // "covers the whole of this period" default. Falling through to the generic
+    // renderer at least claims no coverage it cannot vouch for.
+    //
+    // A type with NO arm here falls through to renderGenericReport, which prints
+    // the rows as a plain table and DROPS the whole designed summary. On a
+    // PII-bearing identity artifact that is not merely an ugly PDF: the caveats
+    // that keep it honest disappear while the sign-in rows remain.
+    && (opts.summary as IdentityAccessSummary).coverage != null
+    && typeof (opts.summary as IdentityAccessSummary).coverage === 'object'
+  ) {
+    // Self-contained chrome: the admin sign-in table paginates on its own
+    // (didDrawPage) and the sections after it add pages as needed.
+    drawHeaderBand(doc, opts);
+    drawFooter(doc, opts);
+    identityAccessPdf.renderIdentityAccessReport(
+      doc,
+      opts.summary as IdentityAccessSummary,
       {
         generatedAt: opts.generatedAt,
         partnerName: opts.branding?.name ?? null,

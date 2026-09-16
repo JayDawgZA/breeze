@@ -196,7 +196,12 @@ const legacyToBuilderType: Record<LegacyReportType, BuilderReportType> = {
   // (severity floor, top-N, exceptions). The builder never offers it; mapping
   // to the compliance source keeps this Record exhaustive and
   // `reportTypeSurvivesBuilder('vulnerability_management')` false.
-  vulnerability_management: 'compliance'
+  vulnerability_management: 'compliance',
+  // #5784 W06 — curated, with its own options form, and NOT representable by
+  // the freeform builder (it has no site dimension and no device rows). Mapped
+  // so the Record stays exhaustive, with
+  // `reportTypeSurvivesBuilder('identity_access_review')` false.
+  identity_access_review: 'devices'
 };
 
 const scheduleOptions: { value: ReportSchedule; label: string; description: string }[] = [

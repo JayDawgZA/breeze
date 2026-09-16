@@ -40,7 +40,8 @@ type GeneratableReportType =
 type ReportType =
   | GeneratableReportType
   | 'threat_detection_review'
-  | 'vulnerability_management';
+  | 'vulnerability_management'
+  | 'identity_access_review';
 
 /** What the reader is told is happening, in their own language. The MSP-side
  *  report definition names are technical; these are not. Total over
