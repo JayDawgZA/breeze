@@ -43,5 +43,8 @@ describe('reportTypeSurvivesBuilder', () => {
     // with its own options form; the freeform builder cannot represent the
     // Intune freshness/trend config at all.
     expect(reportTypeSurvivesBuilder('endpoint_management_review')).toBe(false);
+    // vulnerability_management → compliance: curated template with its own
+    // options form (severity floor, top-N, exceptions), #5784 W04.
+    expect(reportTypeSurvivesBuilder('vulnerability_management')).toBe(false);
   });
 });

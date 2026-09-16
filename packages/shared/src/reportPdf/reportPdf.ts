@@ -12,6 +12,8 @@ import type { ThreatDetectionSummary } from '../types/threatDetectionReport';
 import * as threatDetectionPdf from './threatDetectionPdf';
 import type { EndpointManagementSummary } from '../types/endpointManagementReport';
 import { renderEndpointManagementReport } from './endpointManagementPdf';
+import type { VulnerabilityManagementSummary } from '../types/vulnerabilityManagementReport';
+import { renderVulnerabilityManagementReport } from './vulnerabilityManagementPdf';
 import {
   NARRATIVE_BULLET_MAX_CHARS,
   NARRATIVE_HEADLINE_MAX_CHARS,
@@ -148,7 +150,7 @@ export type BuildOpts = {
   generatedAt: string;
   /** IANA timezone for formatting ISO date cells in generic tables. */
   timezone: string;
-  summary?: PostureSummary | ExecutiveSummary | OrgNarrativeReportSummary | FleetDesignReportSummary | HardwareLifecycleSummary | ThreatDetectionSummary | EndpointManagementSummary;
+  summary?: PostureSummary | ExecutiveSummary | OrgNarrativeReportSummary | FleetDesignReportSummary | HardwareLifecycleSummary | ThreatDetectionSummary | EndpointManagementSummary | VulnerabilityManagementSummary;
   /** Slim baseline from the previous completed run, when the caller supplied
    * one (report_runs.result.previous) — drives the scorecard trend chip and
    * its "since <date>" label. */
@@ -178,6 +180,7 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   hardware_lifecycle: 'Hardware Lifecycle',
   threat_detection_review: 'Threat Detection Review',
   endpoint_management_review: 'Endpoint Management Review',
+  vulnerability_management: 'Vulnerability Management',
 };
 
 const reportTypeLabel = (t: string): string => REPORT_TYPE_LABELS[t] ?? titleCase(t);
@@ -2078,6 +2081,36 @@ function buildReportPdfWithPalette(rows: unknown[], opts: BuildOpts): jsPDF {
       doc,
       opts.summary as EndpointManagementSummary,
       { generatedAt: opts.generatedAt, partnerName: opts.branding?.name ?? null },
+      {
+        C,
+        PAGE,
+        drawHeaderBand: (d) => drawHeaderBand(d, opts),
+        drawFooter: (d) => drawFooter(d, opts),
+        drawTitleBlock,
+        drawSectionHeading,
+      },
+    );
+  } else if (
+    opts.reportType === 'vulnerability_management'
+    && opts.summary
+    && typeof (opts.summary as VulnerabilityManagementSummary).open === 'object'
+  ) {
+    // #5784 W04. WITHOUT this arm the type falls through to
+    // `renderGenericReport` below, which prints the rows as a plain table and
+    // silently drops the whole designed summary — the exceptions section
+    // included. Self-contained chrome: both tables paginate on their own.
+    drawHeaderBand(doc, opts);
+    drawFooter(doc, opts);
+    renderVulnerabilityManagementReport(
+      doc,
+      opts.summary as VulnerabilityManagementSummary,
+      {
+        generatedAt: opts.generatedAt,
+        partnerName: opts.branding?.name ?? null,
+        contactEmail: opts.branding?.contactEmail ?? null,
+        contactName: opts.branding?.contactName ?? null,
+        previous: opts.previous,
+      },
       {
         C,
         PAGE,

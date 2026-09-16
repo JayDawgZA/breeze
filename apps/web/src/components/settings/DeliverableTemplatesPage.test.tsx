@@ -266,6 +266,9 @@ describe('DeliverableTemplatesPage', () => {
   // #5784 W02 shipped the first managed-evidence type, so the picker now has
   // options and the empty state is gone. The picker still defaults to None —
   // auto-evidence is opt-in, never inherited by an existing template item.
+  // W03 and W04 registered further types (endpoint_management_review,
+  // vulnerability_management); the assertion below reads the registry
+  // directly so later waves need no edit here.
   it('renders the auto-evidence report type picker with one option per shipped managed-evidence type', async () => {
     render(<DeliverableTemplatesPage />);
     const orgCard = await screen.findByTestId('deliverable-template-set-set-1');

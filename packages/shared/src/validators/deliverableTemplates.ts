@@ -25,6 +25,8 @@ export const MANAGED_EVIDENCE_REPORT_TYPES = [
   'threat_detection_review',
   // #5784 W03 — Intune endpoint management review over the #5327 sync tables.
   'endpoint_management_review',
+  // #5784 W04 — the vulnerability detail artifact.
+  'vulnerability_management',
 ] as const satisfies readonly string[];
 export type ManagedEvidenceReportType = (typeof MANAGED_EVIDENCE_REPORT_TYPES)[number];
 

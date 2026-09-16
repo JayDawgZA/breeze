@@ -246,10 +246,11 @@ export interface SlaDto {
 export interface PortalRunDto {
   id: string;
   reportId: string;
-  /** NOT the same set as `PORTAL_REPORT_TYPES` (the generate allowlist). A
-   *  managed-evidence run reaches the portal run list once its occurrence is
-   *  delivered, so this union must name every type that can be LISTED, even
-   *  those a portal user may never generate. */
+  /** Every type a portal run row can carry. `portalRunListPredicate` filters
+   *  on org, portal_self_service and status — it has NO type filter — so a
+   *  managed-evidence run of a new type flows through here. An unwidened union
+   *  is a type lie the compiler cannot see, because the value comes from the
+   *  database. Not every member is portal-GENERATABLE: see PORTAL_REPORT_TYPES. */
   type:
     | 'security_compliance_posture'
     | 'executive_summary'
@@ -259,7 +260,9 @@ export interface PortalRunDto {
     // belonging in PORTAL_REPORT_TYPES.
     | 'threat_detection_review'
     // #5784 W03 — managed evidence; listed after delivery, never generated here.
-    | 'endpoint_management_review';
+    | 'endpoint_management_review'
+    // #5784 W04 — managed evidence, visible only once delivered.
+    | 'vulnerability_management';
   name: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   startedAt: string | null;

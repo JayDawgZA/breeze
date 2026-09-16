@@ -14,6 +14,7 @@ import {
   reportRuns
 } from '../db/schema';
 import type { ExecutiveSummary } from '@breeze/shared';
+import { emptyVulnerabilityManagementSummary } from '@breeze/shared';
 import {
   ENDPOINT_MANAGEMENT_NO_SITES_GAP,
   emptyEndpointManagementSummary,
@@ -64,7 +65,12 @@ export type ReportType =
   // posture from the #5327 sync tables, with the freshness of each domain
   // printed. Current inventory plus rollup trend only — entity-level history is
   // not reconstructible (see services/endpointManagementReport.ts).
-  | 'endpoint_management_review';
+  | 'endpoint_management_review'
+  // #5784 W04. Service-plan evidence: the vulnerability DETAIL artifact.
+  // security_compliance_posture keeps its single control line; this is the
+  // findings, exceptions and remediation ranking a vulnerability-management
+  // deliverable needs. See services/vulnerabilityManagementReport.ts.
+  | 'vulnerability_management';
 
 /**
  * Thrown by every generation entry point for a `ReportType` whose artifact is
@@ -920,6 +926,12 @@ async function dispatchReportGeneration(
       const { generateEndpointManagementReport } = await import('./endpointManagementReport');
       return generateEndpointManagementReport(orgId, config, authority, evidence);
     }
+    // #5784 W04. The dynamic import keeps a heavy generator out of the hot path
+    // and avoids the module cycle back to `assertReportExecutionPreflight`.
+    case 'vulnerability_management': {
+      const { generateVulnerabilityManagementReport } = await import('./vulnerabilityManagementReport');
+      return generateVulnerabilityManagementReport(orgId, config, authority, evidence);
+    }
     default: {
       const exhaustive: never = type;
       throw new Error(`Invalid report type: ${String(exhaustive)}`);
@@ -1011,6 +1023,26 @@ function zeroSafeReport(type: ReportType, orgId: string): ReportResult {
           dataGap: ENDPOINT_MANAGEMENT_NO_SITES_GAP,
         }) as unknown as Record<string, unknown>,
       };
+    // #5784 W04. NOT `emptyRowsReport()`: that returns no `summary`, and
+    // `buildReportPdf`'s vulnerability_management arm requires one — a
+    // summary-less result falls through to `renderGenericReport`, which prints
+    // "No data available for the selected filters.", phrasing indistinguishable
+    // from "we checked every device and found none". A site-restricted
+    // authority with zero sites queried nothing, so the counts are NOT
+    // MEASURED and the artifact says which of the two happened.
+    case 'vulnerability_management': {
+      const generatedAt = new Date().toISOString();
+      return {
+        rows: [],
+        rowCount: 0,
+        generatedAt,
+        summary: emptyVulnerabilityManagementSummary(
+          orgId,
+          generatedAt,
+          'This report ran under a site-restricted authority with no sites in scope, so no device was queried. The counts below are not measured — they are not zero.',
+        ) as unknown as Record<string, unknown>,
+      };
+    }
     // P2-3 (#4190) — refused HERE too, not only in the dispatch switch above.
     // A restricted-empty authority short-circuits into this function before
     // dispatch ever runs, and an empty zero-safe shape would read as "the

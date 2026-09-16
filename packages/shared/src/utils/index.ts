@@ -38,3 +38,4 @@ export {
 export * from './hardwareLifecycle';
 export * from './threatDetection';
 export * from './endpointManagement';
+export * from './vulnerabilityManagement';

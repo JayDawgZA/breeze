@@ -26,7 +26,8 @@ import {
   type ExecutiveSummary,
   type OrgNarrativeReportSummary,
   type FleetDesignReportSummary,
-  type EndpointManagementSummary
+  type EndpointManagementSummary,
+  type VulnerabilityManagementSummary
 } from '@breeze/shared';
 import { useTranslation } from 'react-i18next';
 
@@ -46,7 +47,12 @@ export type ReportType =
   | 'threat_detection_review'
   // #5784 W03. No hardcoded label: getReportTypeLabel does a dynamic i18n
   // lookup on reports.reportsList.reportTypes.<type>.
-  | 'endpoint_management_review';
+  | 'endpoint_management_review'
+  // #5784 W04: the vulnerability detail artifact. Curated (its own options
+  // form), never representable by the freeform builder. The list label comes
+  // from `reports.reportsList.reportTypes.vulnerability_management`, resolved
+  // dynamically by getReportTypeLabel — no hardcoded map to update.
+  | 'vulnerability_management';
 
 /**
  * Report types the API owns end to end: the AI schedule creates the definition,
@@ -274,6 +280,10 @@ export default function ReportsList({ onEdit, onGenerate, onDelete, timezone }: 
             // out would let a later refactor drop the summary here and silently
             // degrade the staff PDF to the generic row table.
             | EndpointManagementSummary
+            // #5784 W04: without this member the staff/browser path passes the
+            // designed vulnerability summary as an unrelated type and the
+            // compiler stops guarding buildReportPdf's arm for it.
+            | VulnerabilityManagementSummary
             | undefined,
           // Drives the scorecard trend chip ("79, up from 74 last month")
           // when the stored run snapshot captured a prior baseline.

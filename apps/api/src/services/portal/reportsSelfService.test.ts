@@ -120,6 +120,7 @@ describe('provisionPortalReportDefinitions', () => {
       { type: 'hardware_lifecycle' },
       { type: 'threat_detection_review' },
       { type: 'endpoint_management_review' },
+      { type: 'vulnerability_management' },
     ]);
     state.insertReturning.mockResolvedValue([]);
     state.updateReturning.mockResolvedValue([]);
@@ -214,6 +215,19 @@ describe('provisionPortalReportDefinitions', () => {
         orgId: ORG_ID,
         name: 'Service evidence — Endpoint management review',
         type: 'endpoint_management_review',
+        schedule: 'one_time',
+        format: 'pdf',
+        portalSelfService: true,
+        createdBy: USER_ID,
+        executionScopeKind: 'unrestricted',
+        executionScopeUserId: USER_ID,
+        executionScopePrincipalKind: 'user',
+      }),
+      // #5784 W04 — provisioned, but never portal-generatable.
+      expect.objectContaining({
+        orgId: ORG_ID,
+        name: 'Service evidence — Vulnerability management',
+        type: 'vulnerability_management',
         schedule: 'one_time',
         format: 'pdf',
         portalSelfService: true,
@@ -380,6 +394,12 @@ describe('PORTAL_REPORT_TYPES', () => {
   // produced by the sweep on the occurrence's schedule.
   it('keeps endpoint_management_review OUT of the portal generate allowlist', () => {
     expect(PORTAL_REPORT_TYPES).not.toContain('endpoint_management_review');
+  });
+
+  // #5784 W04, OD-10 = A. Being provisioned as a definition is NOT being
+  // self-servable: a portal user must never be able to run this on demand.
+  it('keeps vulnerability_management OUT of the portal generate allowlist', () => {
+    expect(PORTAL_REPORT_TYPES).not.toContain('vulnerability_management');
   });
 });
 

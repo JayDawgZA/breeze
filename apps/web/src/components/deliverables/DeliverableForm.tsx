@@ -184,6 +184,8 @@ export default function DeliverableForm({
   // itself must stay — the tuple can legitimately be empty again if every type
   // is retired.
   useEffect(() => {
+    // Widened: the tuple is non-empty from #5784 W04 on, so a literal-typed
+    // comparison would be a tsc error rather than the runtime guard it is.
     if ((MANAGED_EVIDENCE_REPORT_TYPES as readonly string[]).length === 0) return;
     let cancelled = false;
     void (async () => {

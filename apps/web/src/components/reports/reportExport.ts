@@ -1,5 +1,6 @@
 import type { PostureSummary, ExecutiveSummary, OrgNarrativeReportSummary, FleetDesignReportSummary,
   EndpointManagementSummary,
+  VulnerabilityManagementSummary,
 } from '@breeze/shared';
 import { formatDateTime } from '@/lib/dateTimeFormat';
 import { escapeCsvCell, escapeTsvCell, neutralizeSpreadsheetFormula } from '@/lib/csvExport';
@@ -60,7 +61,7 @@ export async function exportReport(
     // summary through to buildReportPdf's endpoint-management arm. Without it
     // the summary is dropped and the PDF silently degrades to the generic
     // row table.
-    summary?: PostureSummary | ExecutiveSummary | OrgNarrativeReportSummary | FleetDesignReportSummary | EndpointManagementSummary;
+    summary?: PostureSummary | ExecutiveSummary | OrgNarrativeReportSummary | FleetDesignReportSummary | EndpointManagementSummary | VulnerabilityManagementSummary;
     /** Slim baseline from the previous completed run (report_runs.result.previous),
      * used to draw the scorecard trend chip; ignored by non-cover report types. */
     previous?: { generatedAt?: string | null; summary?: unknown };

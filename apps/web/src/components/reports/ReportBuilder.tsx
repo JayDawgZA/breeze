@@ -191,7 +191,12 @@ const legacyToBuilderType: Record<LegacyReportType, BuilderReportType> = {
   // its own options form; the freeform builder cannot represent its Intune
   // freshness/trend config and never offers it. Mapping to the devices source
   // keeps the Record exhaustive and `reportTypeSurvivesBuilder` false.
-  endpoint_management_review: 'devices'
+  endpoint_management_review: 'devices',
+  // Vulnerability Management (#5784 W04) — curated, with its own options form
+  // (severity floor, top-N, exceptions). The builder never offers it; mapping
+  // to the compliance source keeps this Record exhaustive and
+  // `reportTypeSurvivesBuilder('vulnerability_management')` false.
+  vulnerability_management: 'compliance'
 };
 
 const scheduleOptions: { value: ReportSchedule; label: string; description: string }[] = [

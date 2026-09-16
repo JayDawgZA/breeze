@@ -34,7 +34,11 @@ export const reportTypeSchema = z.enum([
   'threat_detection_review',
   // Endpoint Management Review (#5784 W03): Intune posture evidence from the
   // #5327 M365 sync tables.
-  'endpoint_management_review'
+  'endpoint_management_review',
+  // #5784 W04: the vulnerability detail artifact (findings, exceptions,
+  // remediation ranking). Distinct from security_compliance_posture's single
+  // vulnerability control line.
+  'vulnerability_management'
 ]);
 
 /** Report types a human may never create or generate on demand. */
@@ -158,6 +162,31 @@ export const endpointManagementConfigFields = {
 };
 
 /**
+ * Config for the Vulnerability Management report (#5784 W04, spec §3.4).
+ * `severityFloor` filters the findings sections but NEVER the KEV / high-EPSS
+ * callouts: an actively exploited medium is a different argument from a
+ * theoretical critical, and hiding it behind a severity floor is how it gets
+ * missed. `topN` caps the remediable table; the artifact discloses the number
+ * withheld rather than truncating silently.
+ */
+export const vulnerabilityManagementConfigSchema = z.object({
+  sites: z.array(z.string().guid()).optional().default([]),
+  severityFloor: z.enum(['critical', 'high', 'medium', 'low']).optional().default('high'),
+  topN: z.number().int().min(1).max(500).optional().default(25),
+  includeAccepted: z.boolean().optional().default(true),
+});
+
+/** Same keys as `vulnerabilityManagementConfigSchema` without `.default()`s —
+ *  see `securityCompliancePostureConfigFields` for why the two are hand-parallel
+ *  and test-pinned (schemas.config.test.ts). */
+export const vulnerabilityManagementConfigFields = {
+  sites: z.array(z.string().guid()).optional(),
+  severityFloor: z.enum(['critical', 'high', 'medium', 'low']).optional(),
+  topN: z.number().int().min(1).max(500).optional(),
+  includeAccepted: z.boolean().optional(),
+};
+
+/**
  * Cadence detail + delivery config persisted inside `config`. The builder
  * writes these and reportScheduleWorker reads them; they must be declared here
  * because zod strips unknown object keys — before this schema existed, creates
@@ -201,8 +230,9 @@ const reportConfigFields = {
   emailRecipients: z.array(z.string().regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/).max(254)).max(50).optional(),
   ...securityCompliancePostureConfigFields,
   ...hardwareLifecycleConfigFields,
-  ...threatDetectionConfigFields,
-  ...endpointManagementConfigFields
+...threatDetectionConfigFields,
+  ...endpointManagementConfigFields,
+  ...vulnerabilityManagementConfigFields
 };
 
 // Loose: the builder round-trips presentation metadata (builderType, dataSource,
@@ -251,8 +281,9 @@ export const generateReportSchema = z.object({
     }).optional(),
     ...securityCompliancePostureConfigFields,
     ...hardwareLifecycleConfigFields,
-    ...threatDetectionConfigFields,
-    ...endpointManagementConfigFields
+...threatDetectionConfigFields,
+    ...endpointManagementConfigFields,
+    ...vulnerabilityManagementConfigFields
   }).optional().default({}),
   format: z.enum(['csv', 'pdf', 'excel']).default('csv'),
   orgId: z.string().guid().optional()

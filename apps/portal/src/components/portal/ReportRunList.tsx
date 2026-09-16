@@ -19,13 +19,13 @@ import {
  * server's PORTAL_REPORT_TYPES — the generate endpoint refuses anything
  * outside it.
  *
- * #5784 W02/W03: a managed-evidence run (`threat_detection_review`,
- * `endpoint_management_review`) appears in the list once its occurrence is
- * delivered, but the customer may never generate one — the artifact is the
- * MSP's evidence, produced by the deliverable sweep (OD-10 = A). Keeping the
- * two unions separate is what stops a later edit from wiring a generate
- * button for an evidence type; the row rendering below reads `PortalRunDto`
- * directly, so it needs no entry here.
+ * #5784 W02/W03/W04: a managed-evidence run (`threat_detection_review`,
+ * `endpoint_management_review`, `vulnerability_management`) appears in the
+ * list once its occurrence is delivered, but the customer may never generate
+ * one — the artifact is the MSP's evidence, produced by the deliverable sweep
+ * (OD-10 = A). Keeping the two unions separate is what stops a later edit
+ * from wiring a generate button for an evidence type; the row rendering
+ * below reads `PortalRunDto` directly, so it needs no entry here.
  */
 type GeneratableReportType =
   | 'security_compliance_posture'
@@ -34,12 +34,13 @@ type GeneratableReportType =
 
 /** Every type that can APPEAR in this list. Wider than the generatable set:
  *  `portalRunListPredicate` has no type filter, so a managed-evidence run
- *  (#5784 W02) reaches the list once its occurrence is delivered. Keeping the
- *  two unions apart is what makes "listed but not generatable" (OD-10 = A) a
- *  compile-time fact rather than a convention. */
+ *  (#5784 W02/W03/W04) reaches the list once its occurrence is delivered.
+ *  Keeping the two unions apart is what makes "listed but not generatable"
+ *  (OD-10 = A) a compile-time fact rather than a convention. */
 type ReportType =
   | GeneratableReportType
-  | 'threat_detection_review';
+  | 'threat_detection_review'
+  | 'vulnerability_management';
 
 /** What the reader is told is happening, in their own language. The MSP-side
  *  report definition names are technical; these are not. Total over

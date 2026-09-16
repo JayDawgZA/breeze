@@ -58,7 +58,14 @@ export const MANAGED_EVIDENCE_REGISTRY = Object.freeze({
     definitionName: `${MANAGED_EVIDENCE_DEFINITION_NAME_PREFIX}Endpoint management review`,
     defaultConfig: { sites: [], staleEnrolmentDays: 14, trendDays: 30, includeLicences: true },
   },
-  // W04 adds 'vulnerability_management'.
+  // #5784 W04. The vulnerability DETAIL artifact. Config keys are the spec's
+  // (§3.4) and are spelled identically in `vulnerabilityManagementConfigSchema`
+  // and the portal `PORTAL_DEFINITIONS` entry.
+  vulnerability_management: {
+    type: 'vulnerability_management',
+    definitionName: `${MANAGED_EVIDENCE_DEFINITION_NAME_PREFIX}Vulnerability management`,
+    defaultConfig: { sites: [], severityFloor: 'high', topN: 25, includeAccepted: true },
+  },
   // W06 adds 'identity_access_review'.
 } as const satisfies Readonly<Record<string, ManagedEvidenceEntry>>);
 

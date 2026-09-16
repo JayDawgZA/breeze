@@ -95,6 +95,23 @@ const PORTAL_DEFINITIONS = [
       includeLicences: true,
     },
   },
+  // #5784 W04 — managed evidence, NOT self-service. Provisioned here so an org
+  // that already enabled portal reports has the definition ready (and so
+  // `resolveManagedEvidenceDefinition` adopts it rather than racing to create
+  // it), but deliberately ABSENT from PORTAL_REPORT_TYPES: a portal user can
+  // never generate it, and a run only becomes visible when the deliverable
+  // occurrence is delivered (OD-12). Name and config are spelled identically
+  // to MANAGED_EVIDENCE_REGISTRY's entry.
+  {
+    type: 'vulnerability_management',
+    name: 'Service evidence — Vulnerability management',
+    config: {
+      sites: [],
+      severityFloor: 'high',
+      topN: 25,
+      includeAccepted: true,
+    },
+  },
 ] as const;
 
 /** Exported for `managedEvidenceRegistry.test.ts`, which pins this array
@@ -390,7 +407,7 @@ function toDto(row: {
   // type filter, so a managed-evidence run of a type outside the three
   // self-service ones legitimately flows through here. Typing it as
   // PortalReportType was a lie the compiler could not see, because the value
-  // comes from the database (#5784 W02, W03).
+  // comes from the database (#5784 W02, W03, W04).
   type: PortalRunDto['type'];
   status: 'pending' | 'running' | 'completed' | 'failed';
   startedAt: Date | null;

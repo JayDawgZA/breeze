@@ -30,6 +30,11 @@ import {
   EndpointManagementOptionsForm,
   type EndpointManagementOptions,
 } from './EndpointManagementOptionsForm';
+import {
+  DEFAULT_VULNERABILITY_MANAGEMENT_OPTIONS,
+  VulnerabilityManagementOptionsForm,
+  type VulnerabilityManagementOptions,
+} from './VulnerabilityManagementOptionsForm';
 import type { ReportFormat, ReportSchedule } from './ReportsList';
 import { fetchWithAuth } from '../../stores/auth';
 import { useOrgStore } from '../../stores/orgStore';
@@ -82,6 +87,7 @@ const reportTypeValues: TemplateReportType[] = [
   'hardware_lifecycle',
   'threat_detection_review',
   'endpoint_management_review',
+  'vulnerability_management',
   'devices',
   'alerts',
   'patches',
@@ -162,6 +168,24 @@ const defaultTemplates: ReportTemplate[] = [
     tone: {
       iconBg: 'bg-cyan-500/15',
       iconColor: 'text-cyan-600'
+    }
+  },
+  {
+    id: 'vulnerability_management',
+    name: 'Vulnerability Management Report',
+    description:
+      'Open findings by severity with actively exploited (KEV) and high-EPSS called out separately, the patchable findings to remediate first, and the accepted-risk exceptions expiring next period.',
+    defaults: {
+      name: 'Vulnerability Management Report',
+      type: 'vulnerability_management',
+      dateRange: { preset: 'last_30_days' },
+      schedule: 'monthly',
+      format: 'pdf'
+    },
+    icon: ShieldAlert,
+    tone: {
+      iconBg: 'bg-rose-500/15',
+      iconColor: 'text-rose-600'
     }
   },
   {
@@ -374,6 +398,8 @@ export default function ReportTemplates() {
   const [threatOptions, setThreatOptions] = useState<ThreatDetectionOptions>(DEFAULT_THREAT_DETECTION_OPTIONS);
   const [endpointManagementTemplate, setEndpointManagementTemplate] = useState<ReportTemplate | null>(null);
   const [endpointManagementOptions, setEndpointManagementOptions] = useState<EndpointManagementOptions>(DEFAULT_ENDPOINT_MANAGEMENT_OPTIONS);
+  const [vulnerabilityTemplate, setVulnerabilityTemplate] = useState<ReportTemplate | null>(null);
+  const [vulnerabilityOptions, setVulnerabilityOptions] = useState<VulnerabilityManagementOptions>(DEFAULT_VULNERABILITY_MANAGEMENT_OPTIONS);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [creatingId, setCreatingId] = useState<string | null>(null);
 
@@ -468,6 +494,11 @@ export default function ReportTemplates() {
       if (type === 'endpoint_management_review') {
         setEndpointManagementOptions(DEFAULT_ENDPOINT_MANAGEMENT_OPTIONS);
         setEndpointManagementTemplate(template);
+        return;
+      }
+      if (type === 'vulnerability_management') {
+        setVulnerabilityOptions(DEFAULT_VULNERABILITY_MANAGEMENT_OPTIONS);
+        setVulnerabilityTemplate(template);
         return;
       }
       if (type && !reportTypeSurvivesBuilder(type)) {
@@ -711,6 +742,30 @@ export default function ReportTemplates() {
                 onCancel={() => setEndpointManagementTemplate(null)}
                 onSubmit={() => {
                   void handleCreateDirect(endpointManagementTemplate, { ...endpointManagementOptions });
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {vulnerabilityTemplate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-6 shadow-lg">
+            <h2 className="text-lg font-semibold">
+              {t('reports.reportTemplates.useTemplateTitle', {
+                name: getTemplateDisplayName(vulnerabilityTemplate),
+              })}
+            </h2>
+            <div className="mt-5">
+              <VulnerabilityManagementOptionsForm
+                value={vulnerabilityOptions}
+                onChange={setVulnerabilityOptions}
+                busy={creatingId === vulnerabilityTemplate.id}
+                submitLabel={t('reports.vulnerabilityManagementOptions.createReport')}
+                onCancel={() => setVulnerabilityTemplate(null)}
+                onSubmit={() => {
+                  void handleCreateDirect(vulnerabilityTemplate, { ...vulnerabilityOptions });
                 }}
               />
             </div>
