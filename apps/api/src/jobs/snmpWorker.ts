@@ -98,6 +98,31 @@ async function recordSiteAuthorityFailure(
   );
 }
 
+/**
+ * Spec §6.1 (F2) — the device is configured for SNMP but has no template, so
+ * `buildSnmpPollCommand` would carry zero OIDs and the poll would ask the
+ * device nothing. Before this, that logged a console.warn and left
+ * `last_status` NULL forever: every page said "SNMP monitoring: Enabled" about
+ * a device that had never collected a single value.
+ *
+ * Deliberately NOT routed through recordSiteAuthorityFailure: this must not
+ * touch `consecutive_failures`. The poll never left the building, so counting
+ * it would multiply the polling interval by 2^n and eventually stamp 'offline'
+ * on a device nobody ever asked anything — and it would break the #3217
+ * scheduler contract that snmpWorkerScheduler.test.ts pins.
+ *
+ * A later successful poll clears it like any other status (processPollResults
+ * sets last_status = 'online' unconditionally on success).
+ */
+async function recordNoTemplate(deviceId: string): Promise<void> {
+  await runWithSystemDbAccess(() =>
+    db
+      .update(snmpDevices)
+      .set({ lastStatus: 'no_template', lastPollAttemptedAt: new Date() })
+      .where(eq(snmpDevices.id, deviceId))
+  );
+}
+
 let snmpQueue: Queue | null = null;
 
 export function getSnmpQueue(): Queue {
@@ -139,11 +164,38 @@ interface PollDeviceJobData {
   orgId: string;
 }
 
+/**
+ * One metric from an agent poll.
+ *
+ * Fields beyond `oid`/`name`/`value`/`timestamp` are protocol 2 (spec §7.2,
+ * shipped by W02 agents). A payload without them is legacy and is normalised on
+ * the way in: baseOid = oid, instance = ''. There is deliberately no version
+ * discriminator on the ROW — `protocol: 2` rides the result envelope, and every
+ * field here is independently optional, so a partially-upgraded fleet needs no
+ * branch.
+ */
 export interface SnmpMetricResult {
   oid: string;
   name: string;
   value: unknown;
   timestamp: string;
+  baseOid?: string;
+  instance?: string;
+  error?: string;
+}
+
+/**
+ * The closed set of per-OID failure codes (spec §7.2). Anything else an agent
+ * sends is stored as 'unknown': `snmp_metrics.error` is varchar(32) and is
+ * classified `included` in the tenant export, so it must never become a channel
+ * for arbitrary agent-supplied text.
+ */
+export const SNMP_ERROR_CODES = ['noSuchObject', 'noSuchInstance', 'endOfMib', 'timeout', 'truncated'] as const;
+const SNMP_ERROR_CODE_SET: ReadonlySet<string> = new Set(SNMP_ERROR_CODES);
+
+function normalizeSnmpError(error: unknown): string | null {
+  if (typeof error !== 'string' || error.length === 0) return null;
+  return SNMP_ERROR_CODE_SET.has(error) ? error : 'unknown';
 }
 
 interface ProcessPollResultsJobData {
@@ -465,6 +517,7 @@ async function processPollDevice(data: PollDeviceJobData): Promise<{
     }
     case 'no-oids':
       console.warn(`[SnmpWorker] No OIDs configured for device ${data.deviceId}`);
+      await recordNoTemplate(data.deviceId);
       return { dispatched: false, agentId: null };
     case 'asset-missing':
       console.warn(`[SnmpWorker] Asset ${inputs.assetId} not found in org ${inputs.orgId}; refusing asset-bound SNMP poll`);
@@ -542,15 +595,26 @@ async function processPollResults(data: ProcessPollResultsJobData): Promise<{
   // Phase 2 — parse/shape the agent-supplied metrics with NO DB context open.
   // An agent can return thousands of OIDs; this is pure CPU work and must not
   // run while a pooled connection sits idle-in-transaction (#1105).
-  const rows = data.metrics.map((metric) => ({
-    deviceId: data.deviceId,
-    orgId: snmpDevice.orgId,
-    oid: metric.oid,
-    name: metric.name || metric.oid,
-    value: metric.value != null ? String(metric.value) : null,
-    valueType: resolveValueType(metric.value),
-    timestamp: metric.timestamp ? new Date(metric.timestamp) : now
-  }));
+  let nonErrorRows = 0;
+  const rows = data.metrics.map((metric) => {
+    const error = normalizeSnmpError(metric.error);
+    if (!error) nonErrorRows++;
+    return {
+      deviceId: data.deviceId,
+      orgId: snmpDevice.orgId,
+      oid: metric.oid,
+      // Spec §7.3 — a legacy row IS its own base OID with no instance suffix.
+      // Normalising here (rather than COALESCEing at every read) keeps the
+      // §6.2 derivation and the §6.3 history query from each inventing a rule.
+      baseOid: typeof metric.baseOid === 'string' && metric.baseOid.length > 0 ? metric.baseOid : metric.oid,
+      instance: typeof metric.instance === 'string' ? metric.instance : '',
+      name: metric.name || metric.oid,
+      value: error ? null : (metric.value != null ? String(metric.value) : null),
+      valueType: error ? 'error' : resolveValueType(metric.value),
+      error,
+      timestamp: metric.timestamp ? new Date(metric.timestamp) : now
+    };
+  });
 
   // Phase 3 — the writes, in one context so the metric insert and the device
   // status stamp commit together.
@@ -559,22 +623,29 @@ async function processPollResults(data: ProcessPollResultsJobData): Promise<{
       await db.insert(snmpMetrics).values(rows);
     }
 
-    // Update device lastPolled and status. Clearing consecutiveFailures here is
-    // the only thing that cancels the backoff started at dispatch (#3217) — it
-    // must stay after the metric insert, and inside the same context, so a
-    // persistence failure rolls back the clear and keeps the count.
-    await db
-      .update(snmpDevices)
-      .set({
-        lastPolled: now,
-        lastPollAttemptedAt: now,
-        lastStatus: 'online',
-        consecutiveFailures: 0
-      })
-      .where(eq(snmpDevices.id, data.deviceId));
+    if (nonErrorRows > 0) {
+      // At least one real value arrived. Clearing consecutiveFailures here is
+      // the only thing that cancels the backoff started at dispatch (#3217) —
+      // it must stay after the metric insert, and inside the same context, so a
+      // persistence failure rolls back the clear and keeps the count.
+      await db
+        .update(snmpDevices)
+        .set({ lastPolled: now, lastPollAttemptedAt: now, lastStatus: 'online', consecutiveFailures: 0 })
+        .where(eq(snmpDevices.id, data.deviceId));
+    } else {
+      // Spec §7.3 — every row was an error (or there were none at all). The
+      // device ANSWERED, so this is not 'offline'; but nothing was collected,
+      // so `last_polled` must not move and the backoff must not be cleared.
+      // 'warning' is the existing value the Redis-unavailable path already
+      // uses for "we heard from it but stored nothing".
+      await db
+        .update(snmpDevices)
+        .set({ lastPollAttemptedAt: now, lastStatus: 'warning' })
+        .where(eq(snmpDevices.id, data.deviceId));
+    }
   });
 
-  console.log(`[SnmpWorker] Wrote ${rows.length} metrics for device ${data.deviceId}`);
+  console.log(`[SnmpWorker] Wrote ${rows.length} metrics (${nonErrorRows} with values) for device ${data.deviceId}`);
   return { metricsWritten: rows.length };
 }
 

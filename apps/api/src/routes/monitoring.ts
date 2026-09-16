@@ -7,104 +7,18 @@ import { authMiddleware, requireMfa, requirePermission, requireScope } from '../
 import { db } from '../db';
 import { devices, deviceSoftware, deviceChangeLog, discoveredAssets, networkMonitors, snmpDevices, snmpMetrics, snmpTemplates, serviceProcessCheckResults } from '../db/schema';
 import { writeRouteAudit } from '../services/auditEvents';
+import { loadReachability } from '../services/assetReachabilityLoader';
+import { deriveCollection, type CollectionTemplateEntry } from '../services/snmpCollectionState';
 import { isRedisAvailable } from '../services/redis';
 import { PERMISSIONS, canAccessSite, type UserPermissions } from '../services/permissions';
 import { encryptSnmpSecret, isMaskedSnmpSecret, maskSnmpSecret } from '../services/snmpSecrets';
 
-type AuthContext = {
-  scope: string;
-  orgId: string | null;
-  accessibleOrgIds: string[] | null;
-  canAccessOrg: (orgId: string) => boolean;
-  user?: { id: string } | null;
-};
-
-function resolveOrgId(
-  auth: AuthContext,
-  requestedOrgId?: string,
-  requireForNonOrg = false
-) {
-  if (auth.scope === 'organization') {
-    if (!auth.orgId) return { error: 'Organization context required', status: 403 } as const;
-    if (requestedOrgId && requestedOrgId !== auth.orgId) return { error: 'Access denied', status: 403 } as const;
-    return { orgId: auth.orgId } as const;
-  }
-
-  if (requestedOrgId) {
-    if (!auth.canAccessOrg(requestedOrgId)) return { error: 'Access denied', status: 403 } as const;
-    return { orgId: requestedOrgId } as const;
-  }
-
-  if (auth.scope === 'partner') {
-    const accessibleOrgIds = auth.accessibleOrgIds ?? [];
-    if (!requireForNonOrg && accessibleOrgIds.length === 1) return { orgId: accessibleOrgIds[0] } as const;
-    return { error: 'orgId is required when partner has multiple organizations', status: 400 } as const;
-  }
-
-  if (auth.scope === 'system' && !requestedOrgId) return { error: 'orgId is required for system scope', status: 400 } as const;
-  if (requireForNonOrg && !requestedOrgId) return { error: 'orgId is required', status: 400 } as const;
-  const resolvedOrgId = requestedOrgId ?? auth.orgId;
-  if (!resolvedOrgId) return { error: 'Could not determine organization context', status: 400 } as const;
-  return { orgId: resolvedOrgId } as const;
-}
-
-async function resolveOrgIdForAsset(auth: AuthContext, assetId: string, requestedOrgId?: string) {
-  const orgResult = resolveOrgId(auth, requestedOrgId);
-  if (!('error' in orgResult)) return orgResult;
-
-  const needsAssetResolution = (
-    orgResult.error === 'orgId is required when partner has multiple organizations'
-    || orgResult.error === 'orgId is required for system scope'
-    || orgResult.error === 'orgId is required'
-  );
-  if (!needsAssetResolution) return orgResult;
-
-  const [asset] = await db
-    .select({ orgId: discoveredAssets.orgId })
-    .from(discoveredAssets)
-    .where(eq(discoveredAssets.id, assetId))
-    .limit(1);
-  if (!asset) return { error: 'Asset not found', status: 404 } as const;
-  if (!auth.canAccessOrg(asset.orgId)) return { error: 'Access denied', status: 403 } as const;
-
-  return { orgId: asset.orgId } as const;
-}
-
-/**
- * Resolve and, for a site-restricted caller, lock the discovered asset before a
- * monitoring mutation. The ambient request transaction holds the row lock
- * through the downstream SNMP/network-monitor write, so a concurrent asset move
- * cannot invalidate the current-site decision between check and use.
- */
-async function resolveAssetForMonitoringMutation(
-  auth: AuthContext,
-  perms: UserPermissions | undefined,
-  assetId: string,
-) {
-  if (perms?.allowedSiteIds?.length === 0) {
-    return { error: 'Access to this site denied', status: 403 } as const;
-  }
-
-  const orgResult = await resolveOrgIdForAsset(auth, assetId);
-  if ('error' in orgResult) {
-    return { error: orgResult.error, status: orgResult.status } as const;
-  }
-  const orgId = orgResult.orgId;
-  if (!orgId) return { error: 'Could not determine organization context', status: 400 } as const;
-
-  const query = db.select()
-    .from(discoveredAssets)
-    .where(and(eq(discoveredAssets.id, assetId), eq(discoveredAssets.orgId, orgId)))
-    .limit(1);
-  const rows = perms?.allowedSiteIds ? await query.for('update') : await query;
-  const asset = rows[0];
-  if (!asset) return { error: 'Asset not found', status: 404 } as const;
-  if (perms?.allowedSiteIds && (typeof asset.siteId !== 'string' || !canAccessSite(perms, asset.siteId))) {
-    return { error: 'Access to this site denied', status: 403 } as const;
-  }
-
-  return { asset } as const;
-}
+import {
+  resolveOrgIdForAuth as resolveOrgId,
+  resolveOrgIdForAsset,
+  resolveAssetForMutation as resolveAssetForMonitoringMutation,
+  type AssetAuthContext as AuthContext,
+} from '../services/assetAccessScope';
 
 export const monitoringRoutes = new Hono();
 monitoringRoutes.use('*', authMiddleware);
@@ -276,6 +190,8 @@ monitoringRoutes.get(
       .where(and(...assetConditions))
       .orderBy(desc(discoveredAssets.lastSeenAt));
 
+    const reachabilityByAsset = await loadReachability(assets.map((a) => a.id));
+
     return c.json({
       data: assets.map((a) => {
         const snmp = snmpByAssetId.get(a.id);
@@ -294,6 +210,9 @@ monitoringRoutes.get(
           assetType: a.assetType,
           approvalStatus: a.approvalStatus,
           isOnline: a.isOnline,
+          // W01 (spec §4.4) — `isOnline` is the last scan/controller verdict,
+          // retained for one release; everything new reads `reachability`.
+          reachability: reachabilityByAsset.get(a.id) ?? null,
           lastSeenAt: a.lastSeenAt?.toISOString() ?? null,
           createdAt: a.createdAt.toISOString(),
           updatedAt: a.updatedAt.toISOString(),
@@ -357,6 +276,11 @@ monitoringRoutes.get(
       return c.json({ error: 'Access to this site denied' }, 403);
     }
 
+    // W01 (spec §4.4) — derived once and returned on BOTH exits below. The
+    // `!snmpDevice` early return is the easy one to miss: an asset with network
+    // checks but no SNMP row takes that branch.
+    const reachability = (await loadReachability([assetId])).get(assetId) ?? null;
+
     const snmpRows = await db.select()
       .from(snmpDevices)
       .where(and(eq(snmpDevices.assetId, assetId), eq(snmpDevices.orgId, asset.orgId)))
@@ -391,15 +315,85 @@ monitoringRoutes.get(
           totalCount: Number(networkMonitorTotal?.count ?? 0),
           activeCount: Number(networkMonitorActive?.count ?? 0)
         },
+        reachability,
+        collection: deriveCollection({ templateId: null, templateOids: [], snmpDevice: null, metrics: [] }),
         recentMetrics: []
       });
     }
 
-    const recentMetrics = await db.select()
+    // The template's OID list is what `collection` enumerates: an OID the
+    // template never asked for cannot have a collection state.
+    let templateOids: CollectionTemplateEntry[] = [];
+    if (snmpDevice.templateId) {
+      const [template] = await db
+        .select({ oids: snmpTemplates.oids })
+        .from(snmpTemplates)
+        .where(and(
+          eq(snmpTemplates.id, snmpDevice.templateId),
+          or(eq(snmpTemplates.isBuiltIn, true), eq(snmpTemplates.orgId, asset.orgId))!,
+        ))
+        .limit(1);
+      if (template && Array.isArray(template.oids)) templateOids = template.oids as CollectionTemplateEntry[];
+    }
+
+    const metricBaseExpr = sql`coalesce(${snmpMetrics.baseOid}, ${snmpMetrics.oid})`;
+    const metricInstanceExpr = sql`coalesce(${snmpMetrics.instance}, '')`;
+
+    // Newest row per (base_oid, instance) for this device — a REAL
+    // `DISTINCT ON`, not an ORDER BY + LIMIT.
+    //
+    // This was `ORDER BY (base, instance, timestamp DESC) LIMIT 2000` on the
+    // theory that 2,000 rows covers 64 base OIDs at 31 instances each. That
+    // arithmetic is wrong: LIMIT truncates the GLOBAL result after ordering,
+    // not per group. Rows for the alphabetically-first (base_oid, instance)
+    // sort first, so once that ONE series has 2,000 historical rows — ~7 days
+    // at a 5-minute interval, and this same wave raises retention to 30 days —
+    // it consumes the entire budget and every OTHER OID reaches
+    // deriveCollection with zero rows, which then reports 'stale' or
+    // 'never_polled' for OIDs that are collecting perfectly well. That false
+    // claim is exactly what this wave exists to eliminate.
+    //
+    // Pinned by networkDeviceTruth.integration.test.ts against real Postgres:
+    // a mocked `db` cannot reproduce ORDER BY/LIMIT row-selection semantics.
+    // The composite index of §7.5 serves the ORDER BY.
+    const latestMetrics = await db
+      .selectDistinctOn([metricBaseExpr, metricInstanceExpr], {
+        id: snmpMetrics.id,
+        oid: snmpMetrics.oid,
+        baseOid: snmpMetrics.baseOid,
+        instance: snmpMetrics.instance,
+        name: snmpMetrics.name,
+        value: snmpMetrics.value,
+        valueType: snmpMetrics.valueType,
+        error: snmpMetrics.error,
+        timestamp: snmpMetrics.timestamp,
+      })
       .from(snmpMetrics)
       .where(eq(snmpMetrics.deviceId, snmpDevice.id))
-      .orderBy(desc(snmpMetrics.timestamp))
-      .limit(20);
+      .orderBy(metricBaseExpr, metricInstanceExpr, desc(snmpMetrics.timestamp));
+
+    const collection = deriveCollection({
+      templateId: snmpDevice.templateId,
+      templateOids,
+      snmpDevice: {
+        isActive: snmpDevice.isActive,
+        lastStatus: snmpDevice.lastStatus,
+        lastPolled: snmpDevice.lastPolled,
+        pollingInterval: snmpDevice.pollingInterval,
+        consecutiveFailures: snmpDevice.consecutiveFailures,
+      },
+      metrics: latestMetrics,
+    });
+
+    // Kept for one release — MonitoringAssetsDashboard.tsx still reads it and
+    // W04 deletes that modal. Derived from latestMetrics rather than a second
+    // query, but re-sorted by time first: latestMetrics is ordered by
+    // (base_oid, instance) for the DISTINCT ON above, so a bare slice would
+    // hand the dashboard the alphabetically-first OIDs instead of the device's
+    // actual most recent activity.
+    const recentMetrics = [...latestMetrics]
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, 20);
 
     return c.json({
       enabled: snmpDevice.isActive || Number(networkMonitorActive?.count ?? 0) > 0,
@@ -408,6 +402,8 @@ monitoringRoutes.get(
         totalCount: Number(networkMonitorTotal?.count ?? 0),
         activeCount: Number(networkMonitorActive?.count ?? 0)
       },
+      reachability,
+      collection,
       recentMetrics: recentMetrics.map((m) => ({
         id: m.id,
         oid: m.oid,
