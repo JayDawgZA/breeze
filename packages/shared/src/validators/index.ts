@@ -1133,6 +1133,8 @@ export {
   updateTemplateSetSchema,
   listTemplateSetsQuerySchema,
   applyTemplateSetSchema,
+  MANAGED_EVIDENCE_REPORT_TYPES,
+  type ManagedEvidenceReportType,
   type CreateTemplateItemInput,
   type UpdateTemplateItemInput,
   type CreateTemplateSetInput,
