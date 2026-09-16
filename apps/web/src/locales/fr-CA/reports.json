@@ -295,7 +295,8 @@
         "performance": "Rapport de performance",
         "security_compliance_posture": "Posture de sécurité et de conformité",
         "software_inventory": "Inventaire logiciel",
-        "threat_detection_review": "Revue de la détection des menaces"
+        "threat_detection_review": "Revue de la détection des menaces",
+        "endpoint_management_review": "Revue de gestion des postes"
       },
       "threatDetection": {
         "agents": "Postes avec agent de détection",
@@ -315,6 +316,15 @@
       "viewModes": {
         "chart": "Classement",
         "table": "Tableau"
+      },
+      "endpointManagement": {
+        "breezeWithoutIntune": "Appareils Breeze non inscrits",
+        "dataGaps": "Ce que nous n'avons pas pu mesurer",
+        "intuneDevices": "Inscrits dans Intune",
+        "intuneWithoutBreezeLink": "Enregistrements Intune non liés",
+        "noncompliant": "Non conformes",
+        "notMeasured": "S. O.",
+        "staleEnrolments": "Inscriptions périmées"
       }
     },
     "reportsList": {
@@ -366,7 +376,8 @@
         "performance": "Rapport de performance",
         "security_compliance_posture": "Posture de sécurité et de conformité",
         "software_inventory": "Inventaire logiciel",
-        "threat_detection_review": "Revue de la détection des menaces"
+        "threat_detection_review": "Revue de la détection des menaces",
+        "endpoint_management_review": "Revue de gestion des postes"
       },
       "runsTable": {
         "actions": "Actions",
@@ -878,7 +889,8 @@
         "performance": "Rapport de performance",
         "security_compliance_posture": "Posture de sécurité et de conformité",
         "software_inventory": "Inventaire logiciel",
-        "threat_detection_review": "Revue de la détection des menaces"
+        "threat_detection_review": "Revue de la détection des menaces",
+        "endpoint_management_review": "Revue de gestion des postes"
       },
       "schedules": {
         "daily": "Quotidien",
@@ -920,6 +932,10 @@
         "threat_detection_review": {
           "description": "Les détections de menaces conservées pour une période, avec la fenêtre réellement couverte indiquée à même le rapport — jamais un zéro pour une source qui n’était pas branchée.",
           "name": "Revue de la détection des menaces"
+        },
+        "endpoint_management_review": {
+          "description": "Preuve tirée de Microsoft Intune : couverture des inscriptions, répartition de la conformité avec une tendance sur 30 jours, inscriptions périmées et sièges de licence, avec la fraîcheur de chaque synchronisation.",
+          "name": "Revue de gestion des postes Intune"
         }
       },
       "title": "Modèles de rapports",
@@ -934,6 +950,16 @@
       "includeCarriedInHelp": "Les détections ouvertes avant cette période et toujours non résolues sont listées avec celles de la période.",
       "topIncidents": "Lister au plus (détections)",
       "topIncidentsHelp": "Limite le tableau des détections pour qu’un mois chargé ne produise pas un PDF de cent pages. Le rapport indique combien ont été retenues au lieu de tronquer en silence."
+    },
+    "endpointManagementOptions": {
+      "cancel": "Annuler",
+      "createReport": "Créer le rapport",
+      "includeLicences": "Inclure les sièges de licence",
+      "includeLicencesHelp": "Affiche les sièges utilisés par rapport aux sièges achetés pour chaque produit Microsoft 365.",
+      "staleEnrolmentDays": "Signaler les inscriptions inactives depuis (jours)",
+      "staleEnrolmentDaysHelp": "Un appareil qui n'a pas communiqué avec Intune depuis ce nombre de jours compte comme une inscription périmée. La mesure se fait selon la cadence de synchronisation d'Intune, et non selon la période du rapport.",
+      "trendDays": "Fenêtre de tendance de conformité (jours)",
+      "trendDaysHelp": "Jusqu'où la tendance quotidienne de conformité remonte dans les relevés d'état Microsoft 365."
     }
   }
 }

@@ -846,6 +846,7 @@ export * from './postureReport';
 export * from './executiveSummaryReport';
 export * from './hardwareLifecycleReport';
 export * from './threatDetectionReport';
+export * from './endpointManagementReport';
 
 // ============================================
 // Portal Visibility DTOs (Wave 1 - #4562)

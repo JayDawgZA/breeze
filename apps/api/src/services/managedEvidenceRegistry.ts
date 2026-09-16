@@ -32,6 +32,11 @@ export interface ManagedEvidenceEntry {
  * run list and `routes/reports/helpers.ts` can tell one apart at a glance. The
  * prefix is cosmetic — the authoritative test is `isManagedEvidenceType(type)`
  * AND `reports.portal_self_service = true`.
+ *
+ * DECLARED ABOVE THE REGISTRY ON PURPOSE: entries interpolate it into their
+ * `definitionName` inside a top-level `const` initializer, so moving this back
+ * below `MANAGED_EVIDENCE_REGISTRY` is a TDZ ReferenceError at module load,
+ * not a style nit.
  */
 export const MANAGED_EVIDENCE_DEFINITION_NAME_PREFIX = 'Service evidence — ';
 
@@ -45,7 +50,14 @@ export const MANAGED_EVIDENCE_REGISTRY = Object.freeze({
     definitionName: `${MANAGED_EVIDENCE_DEFINITION_NAME_PREFIX}Threat detection review`,
     defaultConfig: { sites: [], includeCarriedIn: true, topIncidents: 100 },
   },
-  // W03 adds 'endpoint_management_review'.
+  // #5784 W03. `includeLicences` is part of the default config on purpose: the
+  // matching `PORTAL_DEFINITIONS` row in services/portal/reportsSelfService.ts
+  // carries the identical object and a parity assertion compares the two.
+  endpoint_management_review: {
+    type: 'endpoint_management_review',
+    definitionName: `${MANAGED_EVIDENCE_DEFINITION_NAME_PREFIX}Endpoint management review`,
+    defaultConfig: { sites: [], staleEnrolmentDays: 14, trendDays: 30, includeLicences: true },
+  },
   // W04 adds 'vulnerability_management'.
   // W06 adds 'identity_access_review'.
 } as const satisfies Readonly<Record<string, ManagedEvidenceEntry>>);
@@ -61,4 +73,3 @@ export function managedEvidenceEntry(type: ManagedEvidenceType): ManagedEvidence
   if (!entry) throw new Error(`${type} is not a managed evidence type`);
   return entry;
 }
-

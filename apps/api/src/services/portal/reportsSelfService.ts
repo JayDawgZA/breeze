@@ -79,6 +79,22 @@ const PORTAL_DEFINITIONS = [
       topIncidents: 100,
     },
   },
+  // #5784 W03 — managed evidence, NOT self-service. The definition exists so a
+  // DELIVERED run can be listed and downloaded in the portal; the type is
+  // deliberately absent from PORTAL_REPORT_TYPES, so there is no generate
+  // button (OD-10 = A). `config` must stay byte-identical to
+  // MANAGED_EVIDENCE_REGISTRY.endpoint_management_review.defaultConfig —
+  // reportsSelfService.test.ts pins the two together.
+  {
+    type: 'endpoint_management_review',
+    name: 'Service evidence — Endpoint management review',
+    config: {
+      sites: [],
+      staleEnrolmentDays: 14,
+      trendDays: 30,
+      includeLicences: true,
+    },
+  },
 ] as const;
 
 /** Exported for `managedEvidenceRegistry.test.ts`, which pins this array
@@ -374,7 +390,7 @@ function toDto(row: {
   // type filter, so a managed-evidence run of a type outside the three
   // self-service ones legitimately flows through here. Typing it as
   // PortalReportType was a lie the compiler could not see, because the value
-  // comes from the database (#5784 W02).
+  // comes from the database (#5784 W02, W03).
   type: PortalRunDto['type'];
   status: 'pending' | 'running' | 'completed' | 'failed';
   startedAt: Date | null;

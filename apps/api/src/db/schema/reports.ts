@@ -39,7 +39,11 @@ export const reportTypeEnum = pgEnum('report_type', [
   'hardware_lifecycle',
   // Service-plan evidence W02 (#5784): Huntress incidents for an occurrence's
   // period, with an explicit coverage window; see services/threatDetectionReport.ts.
-  'threat_detection_review'
+  'threat_detection_review',
+  // Endpoint Management Review (#5784 W03): service-plan evidence over the
+  // #5327 M365 Intune sync tables — enrolment coverage, compliance breakdown,
+  // stale enrolments and licence seats. Generated on demand; zero new tables.
+  'endpoint_management_review'
 ]);
 
 export const reportScheduleEnum = pgEnum('report_schedule', [

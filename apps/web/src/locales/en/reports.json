@@ -295,7 +295,8 @@
         "performance": "Performance Report",
         "security_compliance_posture": "Security & Compliance Posture",
         "software_inventory": "Software Inventory",
-        "threat_detection_review": "Threat Detection Review"
+        "threat_detection_review": "Threat Detection Review",
+        "endpoint_management_review": "Endpoint Management Review"
       },
       "threatDetection": {
         "agents": "Endpoints with a detection agent",
@@ -315,6 +316,15 @@
       "viewModes": {
         "chart": "Chart",
         "table": "Table"
+      },
+      "endpointManagement": {
+        "breezeWithoutIntune": "Breeze devices not enrolled",
+        "dataGaps": "What we could not measure",
+        "intuneDevices": "Enrolled in Intune",
+        "intuneWithoutBreezeLink": "Intune records not linked",
+        "noncompliant": "Not compliant",
+        "notMeasured": "N/A",
+        "staleEnrolments": "Stale enrolments"
       }
     },
     "reportsList": {
@@ -366,7 +376,8 @@
         "performance": "Performance Report",
         "security_compliance_posture": "Security & Compliance Posture",
         "software_inventory": "Software Inventory",
-        "threat_detection_review": "Threat Detection Review"
+        "threat_detection_review": "Threat Detection Review",
+        "endpoint_management_review": "Endpoint Management Review"
       },
       "runsTable": {
         "actions": "Actions",
@@ -878,7 +889,8 @@
         "performance": "Performance Report",
         "security_compliance_posture": "Security & Compliance Posture",
         "software_inventory": "Software Inventory",
-        "threat_detection_review": "Threat Detection Review"
+        "threat_detection_review": "Threat Detection Review",
+        "endpoint_management_review": "Endpoint Management Review"
       },
       "schedules": {
         "daily": "Daily",
@@ -920,6 +932,10 @@
         "threat_detection_review": {
           "description": "The threat detections held for a period, with the window actually covered stated on the face of it — never a zero for a source that was not connected.",
           "name": "Threat Detection Review"
+        },
+        "endpoint_management_review": {
+          "description": "Microsoft Intune evidence: enrolment coverage, compliance breakdown with a 30-day trend, stale enrolments and licence seats, with the freshness of each sync stated.",
+          "name": "Intune Endpoint Management Review"
         }
       },
       "title": "Report Templates",
@@ -934,6 +950,16 @@
       "includeCarriedInHelp": "Detections that opened before this period and are still unresolved are listed alongside the period’s own.",
       "topIncidents": "List at most (detections)",
       "topIncidentsHelp": "Caps the detection table so a noisy month cannot produce a hundred-page PDF. The report states how many were withheld rather than truncating silently."
+    },
+    "endpointManagementOptions": {
+      "cancel": "Cancel",
+      "createReport": "Create report",
+      "includeLicences": "Include licence seats",
+      "includeLicencesHelp": "Shows seats in use against seats purchased for each Microsoft 365 product.",
+      "staleEnrolmentDays": "Flag enrolments idle for (days)",
+      "staleEnrolmentDaysHelp": "A device that has not checked in with Intune for this many days counts as a stale enrolment. Judged against the Intune sync cadence, not against the reporting period.",
+      "trendDays": "Compliance trend window (days)",
+      "trendDaysHelp": "How far back the daily compliance trend reads from Microsoft 365 posture rollups."
     }
   }
 }
