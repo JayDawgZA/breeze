@@ -185,3 +185,69 @@ describe('classifyPlatformTransportError', () => {
     expect(classifyPlatformTransportError(Object.assign(new Error('x'), { responseCode: false })).kind).toBe('ambiguous');
   });
 });
+
+describe('classifyPlatformTransportError prefers structured fields (W04)', () => {
+  function transportError(message: string, fields: Record<string, unknown>) {
+    return Object.assign(new Error(message), { name: 'EmailTransportError' }, fields);
+  }
+
+  // Structured beats text: these messages contain NO marker at all, so before
+  // the structure existed every one of them fell through to `ambiguous` — and
+  // an `ambiguous` sender refusal is a lost email, because §8.4 forbids
+  // retrying it on the other lane.
+  const TABLE: Array<[string, Record<string, unknown>, string]> = [
+    ['opaque smtp 550', { transport: 'smtp', smtpResponseCode: 550 }, 'domain_unusable'],
+    ['opaque smtp 553', { transport: 'smtp', smtpResponseCode: 553 }, 'domain_unusable'],
+    ['opaque smtp 552', { transport: 'smtp', smtpResponseCode: 552 }, 'message_rejected'],
+    ['opaque smtp 421', { transport: 'smtp', smtpResponseCode: 421 }, 'ambiguous'],
+    ['opaque resend 403', { transport: 'resend', statusCode: 403 }, 'domain_unusable'],
+    ['opaque mailgun 403', { transport: 'mailgun', statusCode: 403 }, 'domain_unusable'],
+    ['opaque mailgun 401', { transport: 'mailgun', statusCode: 401 }, 'domain_unusable'],
+    ['opaque mailgun 429', { transport: 'mailgun', statusCode: 429 }, 'lane_unavailable'],
+    ['opaque resend 429', { transport: 'resend', statusCode: 429 }, 'lane_unavailable'],
+    ['opaque mailgun 400', { transport: 'mailgun', statusCode: 400 }, 'message_rejected'],
+    ['opaque mailgun 500', { transport: 'mailgun', statusCode: 500 }, 'ambiguous'],
+  ];
+
+  for (const [message, fields, kind] of TABLE) {
+    it(`classifies ${message} as ${kind}`, () => {
+      expect(classifyPlatformTransportError(transportError(message, fields)).kind).toBe(kind);
+    });
+  }
+
+  // UNKNOWN 5xx WAS A LOST EMAIL. Before this, any SMTP 5xx the table did not
+  // name fell through to `ambiguous`, which §8.4 forbids retrying on the other
+  // lane — so a permanent sender-side refusal with an unfamiliar code was
+  // thrown away rather than sent from EMAIL_FROM. 5xx is PERMANENT by
+  // definition (RFC 5321 §4.2.1), so the relay definitively did not send it and
+  // the platform-lane fallback is safe; 4xx is a transient deferral and stays
+  // ambiguous.
+  it.each([
+    ['530 auth required', 530, 'domain_unusable'],
+    ['535 bad credentials', 535, 'domain_unusable'],
+    ['501 syntax', 501, 'domain_unusable'],
+    ['521 does not accept mail', 521, 'domain_unusable'],
+    ['421 service unavailable', 421, 'ambiguous'],
+    ['450 mailbox busy', 450, 'ambiguous'],
+  ])('classifies an unmapped SMTP %s as %s', (_label, code, kind) => {
+    expect(classifyPlatformTransportError(transportError('opaque', { transport: 'smtp', smtpResponseCode: code })).kind).toBe(kind);
+  });
+
+  it('still maps 552/554 to message_rejected, not to the new 5xx default', () => {
+    expect(classifyPlatformTransportError(transportError('opaque', { transport: 'smtp', smtpResponseCode: 552 })).kind).toBe('message_rejected');
+    expect(classifyPlatformTransportError(transportError('opaque', { transport: 'smtp', smtpResponseCode: 554 })).kind).toBe('message_rejected');
+  });
+
+  it('lets sender-refusal TEXT win over a status code that says otherwise', () => {
+    // A 400 from Resend whose body says the domain is unverified must still
+    // fall back rather than be treated as a bad message.
+    const err = transportError('Resend error: The acme.test domain is not verified.', { transport: 'resend', statusCode: 400 });
+    expect(classifyPlatformTransportError(err).kind).toBe('domain_unusable');
+  });
+
+  it('still classifies a plain Error with no structure, by text', () => {
+    expect(classifyPlatformTransportError(new Error('550 sender address rejected')).kind).toBe('domain_unusable');
+    expect(classifyPlatformTransportError(new Error('user unknown')).kind).toBe('message_rejected');
+    expect(classifyPlatformTransportError(new Error('socket hang up')).kind).toBe('ambiguous');
+  });
+});

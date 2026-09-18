@@ -8,12 +8,56 @@ import {
   renderLayout,
 } from './emailLayout';
 import type { PartnerLaneMailPurpose, PlatformMailPurpose } from './emailDomains/mailPurposes';
-import { resolveSender } from './emailDomains/senderResolution';
+import { platformFallbackFrom, resolveSender } from './emailDomains/senderResolution';
 
 export interface EmailAttachment {
   filename: string;
   content: Buffer;
   contentType?: string;
+}
+
+/** Which transport produced a failure, and whatever structure it reported. */
+export interface EmailTransportErrorFields {
+  transport: 'resend' | 'smtp' | 'mailgun';
+  /** HTTP status, for the two API transports. */
+  statusCode?: number;
+  /** Resend's own error name, e.g. `validation_error`. */
+  providerErrorName?: string;
+  /** nodemailer's parsed SMTP reply code. Absent when it reported `false`. */
+  smtpResponseCode?: number;
+  /** nodemailer's raw SMTP reply line. */
+  smtpResponse?: string;
+}
+
+/**
+ * A transport failure with its structure intact.
+ *
+ * WHY: the partner lane has to tell "the relay refused this SENDER" (fall back
+ * to EMAIL_FROM, spec §8.4) from "the relay refused this MESSAGE" (throw), and
+ * before this class the only evidence was a flattened string — see the `static`
+ * adapter's classifier and W02 plan amendment 7.
+ *
+ * `message` is IDENTICAL to what this service threw before. Three live matchers
+ * key on that text (services/reportNarrativeDelivery.ts:138, :145, :146), so a
+ * reworded message would silently reclassify narrative-delivery failures. This
+ * class adds fields; it never edits prose.
+ */
+export class EmailTransportError extends Error implements EmailTransportErrorFields {
+  readonly transport: 'resend' | 'smtp' | 'mailgun';
+  readonly statusCode?: number;
+  readonly providerErrorName?: string;
+  readonly smtpResponseCode?: number;
+  readonly smtpResponse?: string;
+
+  constructor(message: string, fields: EmailTransportErrorFields, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'EmailTransportError';
+    this.transport = fields.transport;
+    this.statusCode = fields.statusCode;
+    this.providerErrorName = fields.providerErrorName;
+    this.smtpResponseCode = fields.smtpResponseCode;
+    this.smtpResponse = fields.smtpResponse;
+  }
 }
 
 export interface SendEmailBase {
@@ -279,6 +323,55 @@ export class EmailService {
       defaultFrom: this.defaultFrom,
     });
 
+    if (resolved.lane === 'partner') {
+      // Dynamic so a platform-lane send never loads the provider registry, the
+      // Resend SDK or BullMQ — and so `email.ts -> partnerLaneSend.ts ->
+      // providerRegistry.ts -> adapters/static.ts -> email.ts` is not a static
+      // import cycle (plan amendment 1).
+      const { sendOnPartnerLane } = await import('./emailDomains/partnerLaneSend');
+      const outcome = await sendOnPartnerLane({
+        message: {
+          to,
+          cc,
+          subject,
+          html,
+          text,
+          // Reply-To precedence (spec §8.3): the call site's replyTo, then the
+          // identity's default, then none. Tickets therefore keep
+          // {slug}@TICKETS_INBOUND_DOMAIN and quotes/invoices keep
+          // partner.billingEmail, because those call sites set replyTo.
+          replyTo: replyTo ?? resolved.replyTo ?? undefined,
+          headers,
+          attachments,
+          from: resolved.from,
+        },
+        purpose: params.purpose,
+        partnerId: resolved.partnerId,
+        domainId: resolved.domainId,
+        stream: resolved.stream,
+      });
+      if (outcome.delivered) return;
+
+      // Definitively not sent (spec §8.4). Put it on the platform lane with the
+      // purpose's fallback From — the exact envelope this send site produced
+      // before the feature existed. Deliberately rebuilt from the ORIGINAL
+      // params: no X-Breeze-Outbound, no partner tags, and the call site's own
+      // Reply-To rather than the identity's, whose domain is the one that just
+      // refused us.
+      await this.deliverRaw({
+        to,
+        cc,
+        subject,
+        html,
+        text,
+        replyTo,
+        headers,
+        attachments,
+        from: platformFallbackFrom(params.purpose, this.defaultFrom, params.partnerName ?? null),
+      });
+      return;
+    }
+
     await this.deliverRaw({
       to,
       cc,
@@ -323,7 +416,14 @@ export class EmailService {
         }))
       });
       if (error) {
-        throw new Error(`Resend error: ${error.message}`);
+        // Text unchanged; the SDK's own name/statusCode now ride along so the
+        // partner lane can classify without regex-matching prose.
+        const detail = error as { name?: unknown; statusCode?: unknown };
+        throw new EmailTransportError(`Resend error: ${error.message}`, {
+          transport: 'resend',
+          providerErrorName: typeof detail.name === 'string' ? detail.name : undefined,
+          statusCode: typeof detail.statusCode === 'number' ? detail.statusCode : undefined,
+        }, { cause: error });
       }
       return;
     }
@@ -361,24 +461,41 @@ export class EmailService {
     // headers (e.g. Auto-Submitted) stay in the generic map.
     const { messageId, inReplyTo, references, rest } = liftThreadingHeaders(headers);
 
-    await this.smtpTransport.sendMail({
-      from: sender,
-      to,
-      cc,
-      subject,
-      html,
-      text,
-      replyTo,
-      messageId,
-      inReplyTo,
-      references,
-      headers: rest,
-      attachments: attachments?.map((a) => ({
-        filename: a.filename,
-        content: a.content,
-        contentType: a.contentType
-      }))
-    });
+    try {
+      await this.smtpTransport.sendMail({
+        from: sender,
+        to,
+        cc,
+        subject,
+        html,
+        text,
+        replyTo,
+        messageId,
+        inReplyTo,
+        references,
+        headers: rest,
+        attachments: attachments?.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType
+        }))
+      });
+    } catch (err) {
+      // nodemailer's error is the only one that already carried structure, so
+      // the message is simply forwarded. `responseCode` is `false` — not
+      // missing — when the reply had no leading digits, which is why this is a
+      // typeof check and not a truthiness check.
+      const detail = err as { responseCode?: unknown; response?: unknown } | null;
+      throw new EmailTransportError(
+        err instanceof Error ? err.message : String(err),
+        {
+          transport: 'smtp',
+          smtpResponseCode: typeof detail?.responseCode === 'number' ? detail.responseCode : undefined,
+          smtpResponse: typeof detail?.response === 'string' ? detail.response : undefined,
+        },
+        { cause: err },
+      );
+    }
   }
 
   async sendPasswordReset(params: PasswordResetEmailParams): Promise<void> {
@@ -888,7 +1005,12 @@ async function sendViaMailgun(
   if (!response.ok) {
     const message = await response.text().catch(() => '');
     const details = message ? `: ${message}` : '';
-    throw new Error(`Mailgun API error (${response.status})${details}`);
+    // `Mailgun API error (<status>)<details>` is matched verbatim by
+    // services/reportNarrativeDelivery.ts:145-146. Only the shape changes.
+    throw new EmailTransportError(`Mailgun API error (${response.status})${details}`, {
+      transport: 'mailgun',
+      statusCode: response.status,
+    });
   }
 }
 
