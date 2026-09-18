@@ -760,6 +760,19 @@ monitoringRoutes.patch(
       if (isMaskedSnmpSecret(body.privPassword)) delete setValues.privPassword;
       else setValues.privPassword = encryptSnmpSecret(body.privPassword);
     }
+
+    // Deliberately NOT auto-applying a template suggestion here (#6099
+    // follow-up). PATCH is a partial-edit endpoint: unlike PUT/create, an
+    // absent `templateId` on PATCH does not mean "no explicit choice yet" —
+    // it means "this edit isn't about the template." Every PATCH caller that
+    // omits templateId for an unrelated field (the web form's own explicit
+    // clear followed by, say, an interval change; AI tools; scheduler/
+    // threshold saves; agent paths) must leave templateId exactly as it was,
+    // including staying null after an explicit clear. Auto-apply only
+    // belongs on the one-time "no explicit choice yet" moment, which is PUT.
+    // The web UI already has the suggestion from a separate GET
+    // (`/monitoring/templates/suggest`, W03) and offers "Use suggestion"
+    // from there, so nothing is lost by not echoing it here too.
     if (Object.keys(setValues).length === 0) return c.json({ error: 'No fields to update' }, 400);
 
     // Captured before the scheduler fields below are mixed in, so the audit
