@@ -1287,8 +1287,8 @@ importers:
         specifier: ^26.4.1
         version: 26.4.1
       dotenv:
-        specifier: 16.6.1
-        version: 16.6.1
+        specifier: 17.4.2
+        version: 17.4.2
       happy-dom:
         specifier: ^20.11.0
         version: 20.11.1
