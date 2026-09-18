@@ -548,7 +548,8 @@
       },
       "ticketing": {
         "label": "Ticketing",
-        "description": "Statuses, SLAs, exports"
+        "description": "Statuses, SLAs, categories, forms",
+        "linkCta": "Manage ticketing settings →"
       },
       "aiBudgets": {
         "label": "AI Budgets",
@@ -565,6 +566,10 @@
       "loginBranding": {
         "label": "Login Branding",
         "description": "Login page appearance"
+      },
+      "modules": {
+        "label": "Modules",
+        "description": "Service desk & billing on/off"
       }
     },
     "saved": "Partner settings saved",
@@ -3404,7 +3409,8 @@
   "catalogSettingsPage": {
     "productCatalog": "Product Catalog",
     "theProductCatalogIsAvailableToPartnerAccountsOnly": "The product catalog is available to partner accounts only.",
-    "manageHardwareSoftwareAndServiceItemsUsedAcrossQuotesCon": "Manage hardware, software, and service items used across quotes, contracts, and invoices. Connect distributors (Pax8, TD SYNNEX) under Integrations → Distributors."
+    "manageHardwareSoftwareAndServiceItemsUsedAcrossQuotesCon": "Manage hardware, software, and service items used across quotes, contracts, and invoices. Connect distributors (Pax8, TD SYNNEX) under Integrations → Distributors.",
+    "distributorsLink": "Manage distributor connections →"
   },
   "changePasswordForm": {
     "currentPasswordIsRequired": "Current password is required",
@@ -4204,7 +4210,10 @@
     "inboundEmail": "Inbound Email",
     "cannedResponses": "Canned responses",
     "checkingAccess": "Checking your access...",
-    "timeTracking": "Time Tracking"
+    "timeTracking": "Time Tracking",
+    "email": "Email",
+    "templates": "Templates",
+    "timeCapture": "Time capture"
   },
   "ticketFormsCard": {
     "heading": "Intake forms",
@@ -5589,5 +5598,18 @@
     "title": "AI budget",
     "description": "Spending caps, rate limits and approval mode for the AI assistant in this organization. Fields your partner has set are shown here but can only be changed on the partner tab.",
     "selectOrganization": "Select an organization to configure its AI budget."
+  },
+  "ticketingHubPage": {
+    "heading": "Ticketing Settings",
+    "description": "Statuses, SLAs, categories, intake forms, email, templates and time capture — applied across all of your organizations."
+  },
+  "catalogDefaultsCard": {
+    "title": "Catalog defaults",
+    "description": "Used to pre-fill catalog imports and the quote editor's auto-fill — these never affect price resolution directly.",
+    "loading": "Loading catalog defaults...",
+    "loadError": "Failed to load catalog defaults.",
+    "saveError": "Failed to save catalog defaults",
+    "saveSuccess": "Catalog defaults saved",
+    "saveButton": "Save"
   }
 }
