@@ -597,6 +597,15 @@ function safeHandler(toolName: string, fn: FleetHandler): FleetHandler {
 // warning about AI-tool/route dual-map drift. Keep these value lists in
 // sync with routes/fleetFindings.ts's KIND_VALUES/SEVERITY_VALUES/STATUS_VALUES.
 
+/**
+ * Annotation for a deployment page that a site/device-restricted caller had rows
+ * removed from (or that came back empty while the caller is restricted). Without
+ * it an empty page is indistinguishable from "this organization runs no
+ * deployments", which the model then reports as fact.
+ */
+const DEPLOYMENT_SITE_SCOPE_PARTIAL_NOTE =
+  'Some deployments were withheld because they reach devices outside your site access — this list may be incomplete.';
+
 const FLEET_FINDING_KIND_VALUES = ['metric_anomaly_pattern', 'log_correlation', 'reliability_offenders'] as const;
 const FLEET_FINDING_SEVERITY_VALUES = ['info', 'warning', 'error', 'critical'] as const;
 const FLEET_FINDING_STATUS_VALUES = ['open', 'acknowledged', 'dismissed', 'resolved'] as const;
@@ -658,18 +667,44 @@ export function registerFleetTools(aiTools: Map<string, AiTool>): void {
       // their member devices (mirrors routes/deployments.ts:760-766). Control
       // actions affect ALL member devices, so deny if the deployment includes
       // ANY out-of-site device (fail closed). Unrestricted callers: always false.
-      const deploymentSiteDenied = async (deploymentId: string): Promise<boolean> => {
-        if (!auth.allowedSiteIds && !auth.allowedDeviceIds) return false;
-        const members = await db.select({ deviceId: deploymentDevices.deviceId, siteId: devices.siteId })
+      // Batched form: ONE membership query for any number of deployments, so
+      // `list` never degenerates into an N+1 for a restricted caller. Returns
+      // the subset of `deploymentIds` the caller must not reach; an empty set
+      // (and zero queries) for an unrestricted caller.
+      const deniedDeploymentIds = async (deploymentIds: string[]): Promise<Set<string>> => {
+        if (!auth.allowedSiteIds && !auth.allowedDeviceIds) return new Set();
+        if (deploymentIds.length === 0) return new Set();
+        const members = await db.select({
+          deploymentId: deploymentDevices.deploymentId,
+          deviceId: deploymentDevices.deviceId,
+          siteId: devices.siteId,
+        })
           .from(deploymentDevices)
           .leftJoin(devices, eq(deploymentDevices.deviceId, devices.id))
-          .where(eq(deploymentDevices.deploymentId, deploymentId));
+          .where(inArray(deploymentDevices.deploymentId, deploymentIds));
+        const denied = new Set<string>();
+        const seen = new Set<string>();
         // Three arguments, not two (#6096): the member IS a device, so the
         // exact-device axis applies — a device-bound run shares its site with
         // every sibling, and site alone would wave them through. `?? null`
         // keeps an unresolvable member failing closed for such a run.
-        return members.some((m) => deviceSiteDenied(auth, m.siteId, m.deviceId ?? null));
+        for (const m of members) {
+          seen.add(m.deploymentId);
+          if (deviceSiteDenied(auth, m.siteId, m.deviceId ?? null)) denied.add(m.deploymentId);
+        }
+        // A deployment with NO member rows produced no evidence either way, so
+        // the denied set stayed empty and it was visible and CONTROLLABLE by a
+        // restricted caller (fail-OPEN). An unattributable resource is denied
+        // to a restricted caller — the same rule the SLA and browser-policy
+        // gates apply to an empty target list.
+        for (const id of deploymentIds) {
+          if (!seen.has(id)) denied.add(id);
+        }
+        return denied;
       };
+
+      const deploymentSiteDenied = async (deploymentId: string): Promise<boolean> =>
+        (await deniedDeploymentIds([deploymentId])).has(deploymentId);
 
       if (action === 'list') {
         const conditions: SQL[] = [];
@@ -678,6 +713,14 @@ export function registerFleetTools(aiTools: Map<string, AiTool>): void {
         if (typeof input.status === 'string') conditions.push(eq(deployments.status, input.status as any));
 
         const limit = Math.min(Math.max(1, Number(input.limit) || 25), 100);
+        // The site filter below lands AFTER the SQL LIMIT, so a restricted
+        // caller whose newest deployments are all out of scope got an empty (or
+        // short) page while reachable older ones existed — and the model reads
+        // an empty page as "none exist". Over-scan a wider, still-bounded page
+        // and slice after filtering, exactly as `manage_maintenance_windows`
+        // does in this file.
+        const restricted = Boolean(auth.allowedSiteIds || auth.allowedDeviceIds);
+        const scanLimit = restricted ? Math.min(Math.max(limit * 5, 100), 500) : limit;
         const rows = await db.select({
           id: deployments.id,
           name: deployments.name,
@@ -690,9 +733,26 @@ export function registerFleetTools(aiTools: Map<string, AiTool>): void {
         }).from(deployments)
           .where(conditions.length > 0 ? and(...conditions) : undefined)
           .orderBy(desc(deployments.createdAt))
-          .limit(limit);
+          .limit(scanLimit);
 
-        return JSON.stringify({ deployments: rows, showing: rows.length });
+        // Deployments are site-attributable through their member devices, so a
+        // site-restricted caller must not even see the metadata of a deployment
+        // that reaches a device outside their sites (audit §1.1). Batched: one
+        // extra query for a restricted caller, zero for an unrestricted one.
+        const denied = await deniedDeploymentIds(rows.map((r) => r.id));
+        const filtered = denied.size > 0 ? rows.filter((r) => !denied.has(r.id)) : rows;
+        const visible = filtered.slice(0, limit);
+        // Tell the model the page was narrowed, so a short/empty result is not
+        // reported back as "this organization has no deployments".
+        const dropped = restricted && (denied.size > 0 || rows.length > filtered.length);
+
+        return JSON.stringify({
+          deployments: visible,
+          showing: visible.length,
+          ...(dropped || (restricted && visible.length === 0)
+            ? { scopeNote: DEPLOYMENT_SITE_SCOPE_PARTIAL_NOTE }
+            : {}),
+        });
       }
 
       if (action === 'get') {
@@ -703,6 +763,10 @@ export function registerFleetTools(aiTools: Map<string, AiTool>): void {
 
         const [dep] = await db.select().from(deployments).where(and(...conditions)).limit(1);
         if (!dep) return JSON.stringify({ error: 'Deployment not found or access denied' });
+        // Same gate the control actions carry: the progress counts below
+        // aggregate over EVERY member device, so they are unattributable for a
+        // caller who cannot reach all of them (audit §1.1).
+        if (await deploymentSiteDenied(dep.id)) return JSON.stringify({ error: 'Deployment not found or access denied' });
 
         // Get progress stats
         const stats = await db.select({
