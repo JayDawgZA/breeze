@@ -1627,7 +1627,8 @@
       "act": "Act",
       "actConsequence": "Executes allowed operations without a click. No automatic rollback.",
       "actUnavailable": "Not available for this agent yet.",
-      "shadowUnavailableForKind": "This agent only reads and writes reports — there is nothing to shadow.",
+      "designerAct": "On",
+      "designerActConsequence": "Runs on schedule or on demand and writes a Fleet Design. Never changes a device.",
       "shadowApprovalNotice": "Proposals land in Approvals; approving one runs it for real, not a dry run."
     },
     "allOrgs": "All orgs",
@@ -3067,6 +3068,11 @@
       "searchPlaceholder": "Search scripts…",
       "selectedCount_one": "{{count}} script authorized",
       "selectedCount_other": "{{count}} scripts authorized"
+    },
+    "designerNote": {
+      "title": "This agent only reads and writes reports",
+      "body": "A Fleet Designer never executes anything on a device. On means it may run and deliver its designs to the recipients you choose.",
+      "ack": "I understand this agent runs unattended and delivers Fleet Designs."
     }
   },
   "apiKeyForm": {

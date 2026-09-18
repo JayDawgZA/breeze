@@ -1627,7 +1627,8 @@
       "act": "Eylem",
       "actConsequence": "İzin verilen işlemleri tıklama olmadan yürütür. Otomatik geri alma yoktur.",
       "actUnavailable": "Bu aracı için henüz kullanılamıyor.",
-      "shadowUnavailableForKind": "Bu aracı yalnızca rapor okur ve yazar — gölgede izlenecek hiçbir şey yok.",
+      "designerAct": "Açık",
+      "designerActConsequence": "Zamanlamaya göre veya isteğe bağlı çalışır ve bir Fleet Design yazar. Hiçbir cihazı değiştirmez.",
       "shadowApprovalNotice": "Öneriler Onaylar'a düşer; birini onaylamak onu gerçekten çalıştırır — deneme çalıştırması değildir."
     },
     "allOrgs": "Tüm kuruluşlar",
@@ -3067,6 +3068,11 @@
       "searchPlaceholder": "Betik ara…",
       "selectedCount_one": "{{count}} betik yetkilendirildi",
       "selectedCount_other": "{{count}} betik yetkilendirildi"
+    },
+    "designerNote": {
+      "title": "Bu aracı yalnızca okur ve rapor yazar",
+      "body": "Bir Fleet Designer hiçbir zaman bir cihazda bir şey çalıştırmaz. Açık, çalışabileceği ve tasarımlarını seçtiğiniz alıcılara teslim edebileceği anlamına gelir.",
+      "ack": "Bu aracının gözetimsiz çalıştığını ve Fleet Design teslim ettiğini anlıyorum."
     }
   },
   "apiKeyForm": {

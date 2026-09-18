@@ -1627,7 +1627,8 @@
       "act": "Actuación",
       "actConsequence": "Ejecuta las operaciones permitidas sin un clic. No hay reversión automática.",
       "actUnavailable": "Todavía no está disponible para este agente.",
-      "shadowUnavailableForKind": "Este agente solo lee y escribe informes: no hay nada que observar en modo sombra.",
+      "designerAct": "Activado",
+      "designerActConsequence": "Se ejecuta según programación o bajo demanda y escribe un Fleet Design. Nunca cambia un dispositivo.",
       "shadowApprovalNotice": "Las propuestas llegan a Aprobaciones; aprobar una la ejecuta de verdad, no es una simulación."
     },
     "allOrgs": "Todas las organizaciones",
@@ -3067,6 +3068,11 @@
       "searchPlaceholder": "Buscar scripts…",
       "selectedCount_one": "{{count}} script autorizado",
       "selectedCount_other": "{{count}} scripts autorizados"
+    },
+    "designerNote": {
+      "title": "Este agente solo lee y escribe informes",
+      "body": "Un Fleet Designer nunca ejecuta nada en un dispositivo. Activado significa que puede ejecutarse y entregar sus diseños a los destinatarios que elijas.",
+      "ack": "Entiendo que este agente se ejecuta sin supervisión y entrega Fleet Designs."
     }
   },
   "apiKeyForm": {
