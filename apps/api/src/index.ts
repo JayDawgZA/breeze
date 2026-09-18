@@ -266,7 +266,7 @@ import { partnerTrustMode } from './config/partnerTrustMode';
 import { auditChainVerifyEnabled } from './config/auditChainVerify';
 import { getEventBus } from './services/eventBus';
 import { writeAuditEvent } from './services/auditEvents';
-import { drainAuditRetryQueue } from './services/auditService';
+import { drainAuditRetryQueue, runWithAuditRequestTracking } from './services/auditService';
 import { runShutdownPhases } from './services/shutdownPhases';
 import { drainLlmEgressQueue } from './services/llm/llmEgressRecorder';
 import { createCorsOriginResolver } from './services/corsOrigins';
@@ -752,7 +752,8 @@ api.use('*', async (c, next) => {
 });
 
 api.use('*', async (c, next) => {
-  await next();
+  const auditWritten = await runWithAuditRequestTracking(next);
+  if (auditWritten) return;
 
   const method = c.req.method.toUpperCase();
   if (!isMutatingMethod(method)) {
