@@ -45,6 +45,11 @@ const TARGET_GLOBS = [
   // runAction-wrapped POST both the list row and the detail page call — a
   // future bare mutation added here would ship unguarded to both.
   'src/components/alerts/AlertVerdictBadge.tsx',
+  // Work types (#4628 W01): create/rename/archive all mutate partner-wide
+  // billing configuration, and archiving also rewrites ticket-category
+  // defaults -- a silent failure here leaves the tech believing a work type is
+  // gone when it is still being stamped.
+  'src/components/settings/WorkTypesCard.tsx',
   'src/components/settings/PartnerSettingsPage.tsx',
   'src/components/settings/PartnerAiProviderTab.tsx',
   'src/components/settings/OrgSettingsPage.tsx',
@@ -703,7 +708,8 @@ describe('no silent mutations in targeted set', () => {
     // Outbound email templates (PR1 settings UI) add EmailTemplatesTab.tsx
     // and EmailTemplateEditor.tsx: 147 → 149.
     // Disk Cleanup v2 W01 adds DeviceFilesystemTab.tsx: 149 → 150.
-    expect(absoluteFiles.length).toBe(150);
+    // Work types (#4628 W01) add WorkTypesCard.tsx: 150 → 151.
+    expect(absoluteFiles.length).toBe(151);
     for (const f of absoluteFiles) {
       expect(() => statSync(f)).not.toThrow();
     }
