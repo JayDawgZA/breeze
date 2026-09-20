@@ -17,6 +17,7 @@ import (
 
 	"github.com/breeze-rmm/agent/internal/backup/providers"
 	"github.com/breeze-rmm/agent/internal/backup/systemstate"
+	"github.com/breeze-rmm/agent/internal/securefs"
 )
 
 const (
@@ -41,7 +42,11 @@ const (
 var (
 	chmodFile   = os.Chmod
 	chtimesFile = os.Chtimes
-	lchownFile  = os.Lchown
+	// applyWinAttrsFile reapplies the manifest's captured Windows file
+	// attributes (#5407). A var, like its neighbours, so tests can force a
+	// deterministic failure.
+	applyWinAttrsFile = securefs.ApplyWinAttrs
+	lchownFile        = os.Lchown
 	// symlinkFile is a seam over os.Symlink (used by applySystemState's
 	// symlink-artifact branch) so tests can force a deterministic
 	// symlink-creation failure without depending on filesystem permission
@@ -251,6 +256,12 @@ type manifestFile struct {
 	LinkTarget string             `json:"linkTarget,omitempty"`
 	ModeBits   uint32             `json:"modeBits,omitempty"`
 	Owner      *manifestFileOwner `json:"owner,omitempty"`
+	// WinAttrs mirrors backup.SnapshotFile.WinAttrs (#5407) — the preserved
+	// Windows file attributes. Same deliberately-independent-mirror
+	// rationale as the fields above; without it restoreFiles would silently
+	// drop Hidden/System/Sparse on decode, exactly the way it once dropped
+	// Mode/ModTime (O20).
+	WinAttrs uint32 `json:"winAttrs,omitempty"`
 	// Placeholder mirrors backup.SnapshotFile.Placeholder — same
 	// deliberately-independent-mirror rationale as the fields above. True
 	// only for a "dir" entry the walker force-recorded because the
@@ -982,6 +993,15 @@ func restoreFiles(
 					"target", targetPath, "error", chtimesErr.Error())
 			}
 		}
+		// Windows attributes last (#5407): FILE_ATTRIBUTE_READONLY would make
+		// the chmod/chtimes above fail, so they have to have run already.
+		// WinAttrs==0 (non-Windows backup, or a pre-#5407 manifest) is a
+		// no-op, keeping every existing BMR restore byte-identical.
+		if winErr := applyWinAttrsFile(targetPath, file.WinAttrs); winErr != nil {
+			addFidelityFailure("could not reapply windows attributes to %s: %s", origPath, winErr.Error())
+			slog.Warn("bmr: failed to reapply windows file attributes on restore",
+				"target", targetPath, "winAttrs", file.WinAttrs, "error", winErr.Error())
+		}
 
 		filesRestored++
 		bytesRestored += file.Size
@@ -1169,9 +1189,14 @@ func restoreContentlessEntry(targetPath string, file manifestFile) error {
 			return mkErr
 		}
 		if file.ModeBits != 0 {
-			return chmodFile(targetPath, os.FileMode(file.ModeBits)&^os.ModeSetuid)
+			if err := chmodFile(targetPath, os.FileMode(file.ModeBits)&^os.ModeSetuid); err != nil {
+				return err
+			}
 		}
-		return nil
+		// Windows attributes last (#5407, review finding): a Hidden/System
+		// directory must come back Hidden/System here too, and ReadOnly would
+		// block the chmod above if it were applied first.
+		return applyWinAttrsFile(targetPath, file.WinAttrs)
 	default:
 		return fmt.Errorf("entry %s has content; use the download path", file.SourcePath)
 	}
