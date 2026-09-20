@@ -57,6 +57,7 @@ vi.mock('../../services/commandQueue', () => ({
 vi.mock('../../services/filesystemAnalysis', () => ({
   getLatestFilesystemSnapshot: vi.fn(),
   getFilesystemScanState: vi.fn(),
+  setFilesystemScanGeneration: vi.fn(),
   readHotDirectories: vi.fn(() => []),
   readCheckpointPendingDirectories: vi.fn(() => []),
   parseFilesystemAnalysisStdout: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock('../../services/filesystemAnalysis', () => ({
   buildCleanupPreview: vi.fn(),
   getLatestFilesystemCleanupSnapshot: vi.fn(),
   readPlanPreviewCandidates: vi.fn(() => []),
+  readPlanScanPath: vi.fn(() => null),
   safeCleanupCategories: ['temp_files', 'browser_cache', 'package_cache', 'trash']
 }));
 
@@ -71,6 +73,11 @@ vi.mock('../../services/auditEvents', () => ({
   writeRouteAudit: vi.fn()
 }));
 
+vi.mock('../../services/filesystemVolumes', () => ({
+  listFilesystemVolumes: vi.fn(),
+}));
+
+import { listFilesystemVolumes } from '../../services/filesystemVolumes';
 import { db } from '../../db';
 import { writeRouteAudit } from '../../services/auditEvents';
 import { filesystemRoutes } from './filesystem';
@@ -80,10 +87,12 @@ import {
   getLatestFilesystemSnapshot,
   getLatestFilesystemCleanupSnapshot,
   getFilesystemScanState,
+  setFilesystemScanGeneration,
   readHotDirectories,
   readCheckpointPendingDirectories,
   buildCleanupPreview,
   readPlanPreviewCandidates,
+  readPlanScanPath,
 } from '../../services/filesystemAnalysis';
 
 const AGED = new Date(Date.now() - 72 * 3600_000).toISOString();
@@ -94,8 +103,34 @@ describe('device filesystem routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(listFilesystemVolumes).mockResolvedValue([]);
     app = new Hono();
     app.route('/devices', filesystemRoutes);
+  });
+
+  it('requires a volume for unpinned cleanup on a multi-volume device', async () => {
+    vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue({ id: deviceId, orgId: 'org-123', osType: 'windows' } as never);
+    vi.mocked(listFilesystemVolumes).mockResolvedValue([{ scanPath: 'C:\\' }, { scanPath: 'D:\\' }] as never);
+    const res = await app.request(`/devices/${deviceId}/filesystem/cleanup-execute`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: ['D:\\Temp\\a.tmp'] }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'volume_required' });
+    expect(getLatestFilesystemCleanupSnapshot).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('normalizes an explicit volume for unpinned cleanup', async () => {
+    vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue({ id: deviceId, orgId: 'org-123', osType: 'windows' } as never);
+    vi.mocked(getLatestFilesystemCleanupSnapshot).mockResolvedValue(null as never);
+    const res = await app.request(`/devices/${deviceId}/filesystem/cleanup-execute`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'd:', paths: ['D:\\Temp\\a.tmp'] }),
+    });
+    expect(res.status).toBe(404);
+    expect(getLatestFilesystemCleanupSnapshot).toHaveBeenCalledWith(deviceId, 'D:\\');
+    expect(listFilesystemVolumes).not.toHaveBeenCalled();
   });
 
   it('returns latest filesystem snapshot', async () => {
@@ -130,15 +165,6 @@ describe('device filesystem routes', () => {
     vi.mocked(getFilesystemScanState).mockResolvedValue(null as never);
     vi.mocked(readHotDirectories).mockReturnValue([]);
     vi.mocked(readCheckpointPendingDirectories).mockReturnValue([]);
-    vi.mocked(db.select).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          orderBy: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([])
-          })
-        })
-      })
-    } as never);
     vi.mocked(queueCommandForExecution).mockResolvedValue({
       command: {
         id: 'cmd-1',
@@ -633,5 +659,433 @@ describe('device filesystem routes', () => {
     expect(row.executedActions.partial).toBe(false);
     expect(row.executedActions.budgetMs).toBe(240_000);
     expect(row.executedActions.actions).toHaveLength(1);
+  });
+
+  describe('GET /devices/:id/filesystem/volumes (spec §5.1)', () => {
+    it('returns the scannable volumes for the device', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue({
+        id: deviceId, orgId: 'org-123', hostname: 'host-1', osType: 'windows',
+      } as never);
+      vi.mocked(listFilesystemVolumes).mockResolvedValue([
+        {
+          mountPoint: 'C:\\', scanPath: 'C:\\', fsType: 'NTFS',
+          totalGb: 500, usedGb: 400, freeGb: 100, usedPercent: 80, isOsRoot: true,
+          scanState: { lastRunMode: 'baseline', lastBaselineCompletedAt: null, hasCheckpoint: false },
+          latestSnapshot: null,
+        },
+        {
+          mountPoint: 'D:\\', scanPath: 'D:\\', fsType: 'NTFS',
+          totalGb: 2000, usedGb: 100, freeGb: 1900, usedPercent: 5, isOsRoot: false,
+          scanState: null,
+          latestSnapshot: { id: 'snap-d', capturedAt: '2026-09-19T09:00:00.000Z', partial: false, cleanupEstimateBytes: 4096 },
+        },
+      ] as never);
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/volumes`, {
+        headers: { Authorization: 'Bearer token' },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.map((v: { scanPath: string }) => v.scanPath)).toEqual(['C:\\', 'D:\\']);
+      expect(body.data[0].isOsRoot).toBe(true);
+      // The device's OS decides how a mount point normalises, so it must reach
+      // the service — a POSIX default would key a Windows device on '/'.
+      expect(listFilesystemVolumes).toHaveBeenCalledWith(deviceId, 'windows');
+    });
+
+    it('denies the volumes list when site scope excludes the device', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(SITE_ACCESS_DENIED as never);
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/volumes`, {
+        headers: { Authorization: 'Bearer token' },
+      });
+
+      expect(res.status).toBe(403);
+      expect(listFilesystemVolumes).not.toHaveBeenCalled();
+    });
+
+    it('404s for an unknown device without touching the service', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(null as never);
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/volumes`, {
+        headers: { Authorization: 'Bearer token' },
+      });
+
+      expect(res.status).toBe(404);
+      expect(listFilesystemVolumes).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('GET /devices/:id/filesystem — per-volume (spec §5.1)', () => {
+    it('reads the snapshot for the requested volume and echoes the normalised key', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue({
+        id: deviceId, orgId: 'org-123', hostname: 'host-1', osType: 'windows',
+      } as never);
+      vi.mocked(getLatestFilesystemSnapshot).mockResolvedValue({
+        id: 'snap-d', deviceId, scanPath: 'D:\\',
+        capturedAt: new Date('2026-09-19T09:00:00Z'),
+        trigger: 'on_demand', partial: false,
+        summary: {}, largestFiles: [], largestDirs: [], tempAccumulation: [],
+        oldDownloads: [], unrotatedLogs: [], trashUsage: [],
+        duplicateCandidates: [], cleanupCandidates: [], errors: [],
+        rawPayload: { path: 'd:/' },
+      } as never);
+
+      const res = await app.request(`/devices/${deviceId}/filesystem?path=${encodeURIComponent('d:/')}`, {
+        headers: { Authorization: 'Bearer token' },
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(getLatestFilesystemSnapshot).toHaveBeenCalledWith(deviceId, 'D:\\');
+      expect(body.data.scanPath).toBe('D:\\');
+      // `path` is what the agent actually walked and still renders in the tab.
+      expect(body.data.path).toBe('d:/');
+    });
+
+    it('defaults to the OS root when no path is given', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue({
+        id: deviceId, orgId: 'org-123', hostname: 'host-1', osType: 'linux',
+      } as never);
+      vi.mocked(getLatestFilesystemSnapshot).mockResolvedValue(null as never);
+
+      const res = await app.request(`/devices/${deviceId}/filesystem`, {
+        headers: { Authorization: 'Bearer token' },
+      });
+
+      expect(res.status).toBe(404);
+      expect(getLatestFilesystemSnapshot).toHaveBeenCalledWith(deviceId, '/');
+    });
+  });
+
+  describe('POST /devices/:id/filesystem/scan — per-volume (spec §5.1)', () => {
+    const windowsDevice = { id: deviceId, orgId: 'org-123', hostname: 'host-1', osType: 'windows' };
+
+    function twoWindowsVolumes(usedPercentC = 80, usedPercentD = 5) {
+      return [
+        { mountPoint: 'C:\\', scanPath: 'C:\\', fsType: 'NTFS', totalGb: 500, usedGb: 400, freeGb: 100, usedPercent: usedPercentC, isOsRoot: true, scanState: null, latestSnapshot: null },
+        { mountPoint: 'D:\\', scanPath: 'D:\\', fsType: 'NTFS', totalGb: 2000, usedGb: 100, freeGb: 1900, usedPercent: usedPercentD, isOsRoot: false, scanState: null, latestSnapshot: null },
+      ];
+    }
+
+    it('normalises the requested path before it reaches the agent or the scan state', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(listFilesystemVolumes).mockResolvedValue(twoWindowsVolumes() as never);
+      vi.mocked(getFilesystemScanState).mockResolvedValue(null as never);
+      vi.mocked(queueCommandForExecution).mockResolvedValue({
+        command: { id: 'cmd-1', status: 'sent', createdAt: new Date('2026-09-19T09:00:00Z') },
+      } as never);
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/scan`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'd:/' }),
+      });
+
+      expect(res.status).toBe(202);
+      const body = await res.json();
+      expect(body.data.scanPath).toBe('D:\\');
+      expect(getFilesystemScanState).toHaveBeenCalledWith(deviceId, 'D:\\');
+      expect(queueCommandForExecution).toHaveBeenCalledWith(
+        deviceId,
+        'filesystem_analysis',
+        expect.objectContaining({ path: 'D:\\' }),
+        expect.objectContaining({ userId: 'user-123' }),
+      );
+    });
+
+    it('treats ANY volume root as root-scoped, not just C:\\ (defect 6)', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(listFilesystemVolumes).mockResolvedValue(twoWindowsVolumes() as never);
+      vi.mocked(getFilesystemScanState).mockResolvedValue(null as never);
+      vi.mocked(queueCommandForExecution).mockResolvedValue({
+        command: { id: 'cmd-2', status: 'sent', createdAt: new Date() },
+      } as never);
+
+      await app.request(`/devices/${deviceId}/filesystem/scan`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'D:\\' }),
+      });
+
+      // autoContinue is the observable consequence of isRootScopedScan: a
+      // checkpointed baseline resumes itself only on a root-scoped scan.
+      expect(queueCommandForExecution).toHaveBeenCalledWith(
+        deviceId, 'filesystem_analysis',
+        expect.objectContaining({ autoContinue: true }),
+        expect.anything(),
+      );
+    });
+
+    it('does NOT treat a subdirectory as root-scoped', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(listFilesystemVolumes).mockResolvedValue(twoWindowsVolumes() as never);
+      vi.mocked(getFilesystemScanState).mockResolvedValue(null as never);
+      vi.mocked(queueCommandForExecution).mockResolvedValue({
+        command: { id: 'cmd-3', status: 'sent', createdAt: new Date() },
+      } as never);
+
+      await app.request(`/devices/${deviceId}/filesystem/scan`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'D:\\media' }),
+      });
+
+      expect(queueCommandForExecution).toHaveBeenCalledWith(
+        deviceId, 'filesystem_analysis',
+        expect.objectContaining({ autoContinue: false, scanMode: 'baseline' }),
+        expect.anything(),
+      );
+    });
+
+    it('compares the disk percent against the scanned volume, not the fullest disk (defect 8)', async () => {
+      // C: is 80% full, D: is 5%. A D:\ incremental must be judged against D:'s
+      // own 5% baseline; the old code read `ORDER BY used_percent DESC LIMIT 1`,
+      // saw 80, and forced a full baseline on every D:\ scan forever.
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(listFilesystemVolumes).mockResolvedValue(twoWindowsVolumes(80, 5) as never);
+      vi.mocked(getFilesystemScanState).mockResolvedValue({
+        lastRunMode: 'baseline',
+        lastBaselineCompletedAt: new Date('2026-09-18T00:00:00Z'),
+        lastDiskUsedPercent: 4,
+        checkpoint: {},
+        hotDirectories: ['D:\\media'],
+      } as never);
+      vi.mocked(readHotDirectories).mockReturnValue(['D:\\media']);
+      vi.mocked(readCheckpointPendingDirectories).mockReturnValue([]);
+      vi.mocked(queueCommandForExecution).mockResolvedValue({
+        command: { id: 'cmd-4', status: 'sent', createdAt: new Date() },
+      } as never);
+
+      await app.request(`/devices/${deviceId}/filesystem/scan`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'D:\\' }),
+      });
+
+      expect(queueCommandForExecution).toHaveBeenCalledWith(
+        deviceId, 'filesystem_analysis',
+        expect.objectContaining({ scanMode: 'incremental', targetDirectories: ['D:\\media'] }),
+        expect.anything(),
+      );
+    });
+
+    it('records the queued command as this volume\u2019s scan generation', async () => {
+      // Amendment 18 / spec §13 #18 — without this the result handler has
+      // nothing to claim and two concurrent scans of one volume race.
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(listFilesystemVolumes).mockResolvedValue(twoWindowsVolumes() as never);
+      vi.mocked(getFilesystemScanState).mockResolvedValue(null as never);
+      vi.mocked(queueCommandForExecution).mockResolvedValue({
+        command: { id: 'cmd-gen', status: 'sent', createdAt: new Date() },
+      } as never);
+
+      await app.request(`/devices/${deviceId}/filesystem/scan`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'D:\\' }),
+      });
+
+      expect(setFilesystemScanGeneration).toHaveBeenCalledWith(deviceId, 'org-123', 'D:\\', 'cmd-gen');
+    });
+
+    it('does not record a generation when the command could not be queued', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(listFilesystemVolumes).mockResolvedValue(twoWindowsVolumes() as never);
+      vi.mocked(getFilesystemScanState).mockResolvedValue(null as never);
+      vi.mocked(queueCommandForExecution).mockResolvedValue({ command: null, error: 'offline' } as never);
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/scan`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'D:\\' }),
+      });
+
+      expect(res.status).toBe(500);
+      // A generation with no command behind it would make the NEXT real result
+      // look superseded and be dropped.
+      expect(setFilesystemScanGeneration).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a baseline when the scanned volume reports no disk row', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(listFilesystemVolumes).mockResolvedValue([
+        { mountPoint: 'C:\\', scanPath: 'C:\\', fsType: null, totalGb: null, usedGb: null, freeGb: null, usedPercent: null, isOsRoot: true, scanState: null, latestSnapshot: null },
+      ] as never);
+      vi.mocked(getFilesystemScanState).mockResolvedValue({
+        lastRunMode: 'baseline',
+        lastBaselineCompletedAt: new Date('2026-09-18T00:00:00Z'),
+        lastDiskUsedPercent: 80,
+        checkpoint: {},
+        hotDirectories: ['C:\\Windows\\Temp'],
+      } as never);
+      vi.mocked(readHotDirectories).mockReturnValue(['C:\\Windows\\Temp']);
+      vi.mocked(readCheckpointPendingDirectories).mockReturnValue([]);
+      vi.mocked(queueCommandForExecution).mockResolvedValue({
+        command: { id: 'cmd-5', status: 'sent', createdAt: new Date() },
+      } as never);
+
+      await app.request(`/devices/${deviceId}/filesystem/scan`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'C:\\' }),
+      });
+
+      // No delta available -> baseline, never a comparison against an unrelated disk.
+      expect(queueCommandForExecution).toHaveBeenCalledWith(
+        deviceId, 'filesystem_analysis',
+        expect.objectContaining({ scanMode: 'baseline' }),
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('cleanup preview/execute — volume pinning (spec §5.2)', () => {
+    const windowsDevice = { id: deviceId, orgId: 'org-123', hostname: 'host-1', osType: 'windows', agentVersion: '0.115.0' };
+
+    function captureInsert() {
+      const values = vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([{ id: 'run-1' }]),
+      });
+      vi.mocked(db.insert).mockReturnValue({ values } as never);
+      return values;
+    }
+
+    it('previews the requested volume and pins it into the stored plan and the row', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(getLatestFilesystemCleanupSnapshot).mockResolvedValue({
+        id: 'snap-d', scanPath: 'D:\\', capturedAt: new Date(), partial: false, cleanupCandidates: [],
+      } as never);
+      vi.mocked(buildCleanupPreview).mockReturnValue({
+        snapshotId: 'snap-d', estimatedBytes: 4096, candidateCount: 1,
+        categories: [{ category: 'temp_files', count: 1, estimatedBytes: 4096 }],
+        candidates: [{ path: 'D:\\Windows\\Temp\\a.tmp', category: 'temp_files', sizeBytes: 4096, safe: true, modifiedAt: AGED }],
+      } as never);
+      const values = captureInsert();
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/cleanup-preview`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: 'd:/' }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(getLatestFilesystemCleanupSnapshot).toHaveBeenCalledWith(deviceId, 'D:\\');
+      expect(body.data.scanPath).toBe('D:\\');
+      expect(values).toHaveBeenCalledWith(expect.objectContaining({
+        scanPath: 'D:\\',
+        plan: expect.objectContaining({ snapshotId: 'snap-d', scanPath: 'D:\\' }),
+      }));
+    });
+
+    it('previews the OS root when no path is given', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(getLatestFilesystemCleanupSnapshot).mockResolvedValue(null as never);
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/cleanup-preview`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(getLatestFilesystemCleanupSnapshot).toHaveBeenCalledWith(deviceId, 'C:\\');
+      expect(body.scanPath).toBe('C:\\');
+    });
+
+    it('executes against the volume the pinned run recorded, not the OS root', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ plan: { scanPath: 'D:\\' }, scanPath: 'D:\\' }]),
+          }),
+        }),
+      } as never);
+      vi.mocked(readPlanScanPath).mockReturnValue('D:\\');
+      vi.mocked(readPlanPreviewCandidates).mockReturnValue([
+        { path: 'D:\\Windows\\Temp\\a.tmp', category: 'temp_files', sizeBytes: 4096, safe: true, modifiedAt: AGED },
+      ] as never);
+      vi.mocked(executeCommand).mockResolvedValue({ status: 'completed', stdout: JSON.stringify({ deleted: true, bytesFreed: 4096, skippedLocked: [], skippedLinks: [], failedChildren: [] }) } as never);
+      const values = captureInsert();
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/cleanup-execute`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paths: ['D:\\Windows\\Temp\\a.tmp'],
+          cleanupRunId: '22222222-2222-2222-2222-222222222222',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.scanPath).toBe('D:\\');
+      expect(values).toHaveBeenCalledWith(expect.objectContaining({
+        scanPath: 'D:\\',
+        plan: expect.objectContaining({ scanPath: 'D:\\' }),
+      }));
+      // The pinned lane must never re-derive candidates from a snapshot.
+      expect(getLatestFilesystemCleanupSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('recovers the volume from the stored plan when the row predates the column', async () => {
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ plan: { scanPath: 'D:\\' }, scanPath: null }]),
+          }),
+        }),
+      } as never);
+      vi.mocked(readPlanScanPath).mockReturnValue('D:\\');
+      vi.mocked(readPlanPreviewCandidates).mockReturnValue([
+        { path: 'D:\\Windows\\Temp\\a.tmp', category: 'temp_files', sizeBytes: 4096, safe: true, modifiedAt: AGED },
+      ] as never);
+      vi.mocked(executeCommand).mockResolvedValue({ status: 'completed', stdout: JSON.stringify({ deleted: true, bytesFreed: 4096, skippedLocked: [], skippedLinks: [], failedChildren: [] }) } as never);
+      captureInsert();
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/cleanup-execute`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paths: ['D:\\Windows\\Temp\\a.tmp'],
+          cleanupRunId: '22222222-2222-2222-2222-222222222222',
+        }),
+      });
+
+      const body = await res.json();
+      expect(body.data.scanPath).toBe('D:\\');
+    });
+
+    it('falls back to the OS root snapshot on the unpinned lane', async () => {
+      // Before W02 this lane took the newest snapshot of ANY path, which is
+      // defect 6: a D:\ scan became the snapshot a C:\ execute deleted from.
+      // W03 makes cleanupRunId required and deletes this lane entirely.
+      vi.mocked(getDeviceWithOrgAndSiteCheck).mockResolvedValue(windowsDevice as never);
+      vi.mocked(getLatestFilesystemCleanupSnapshot).mockResolvedValue({
+        id: 'snap-c', scanPath: 'C:\\', capturedAt: new Date(), partial: false, cleanupCandidates: [],
+      } as never);
+      vi.mocked(buildCleanupPreview).mockReturnValue({
+        snapshotId: 'snap-c', estimatedBytes: 4096, candidateCount: 1,
+        categories: [], candidates: [{ path: 'C:\\Windows\\Temp\\a.tmp', category: 'temp_files', sizeBytes: 4096, safe: true, modifiedAt: AGED }],
+      } as never);
+      vi.mocked(executeCommand).mockResolvedValue({ status: 'completed', stdout: JSON.stringify({ deleted: true, bytesFreed: 4096, skippedLocked: [], skippedLinks: [], failedChildren: [] }) } as never);
+      captureInsert();
+
+      const res = await app.request(`/devices/${deviceId}/filesystem/cleanup-execute`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: ['C:\\Windows\\Temp\\a.tmp'] }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(getLatestFilesystemCleanupSnapshot).toHaveBeenCalledWith(deviceId, 'C:\\');
+      const body = await res.json();
+      expect(body.data.scanPath).toBe('C:\\');
+    });
   });
 });

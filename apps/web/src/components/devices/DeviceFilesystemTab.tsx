@@ -17,6 +17,9 @@ import type { OSType } from "./DeviceList";
 import { formatNumber } from "@/lib/i18n/format";
 import { useTranslation } from "react-i18next";
 import "../../lib/i18n";
+import { osRootScanPath } from "@breeze/shared";
+import VolumePicker from "./filesystem/VolumePicker";
+import { useFilesystemVolumes } from "./filesystem/useFilesystemVolumes";
 
 type DeviceFilesystemTabProps = {
   deviceId: string;
@@ -39,6 +42,8 @@ type FilesystemSnapshot = {
   partial: boolean;
   reason?: string | null;
   path?: string | null;
+  /** The normalised key this snapshot is stored under (W02). */
+  scanPath?: string | null;
   scanMode?: string | null;
   summary: FilesystemSummary;
   cleanupCandidates?: Array<{
@@ -72,6 +77,7 @@ type FilesystemSnapshot = {
 };
 
 type FilesystemCleanupPreview = {
+  scanPath?: string | null;
   cleanupRunId: string | null;
   estimatedBytes: number;
   candidateCount: number;
@@ -228,11 +234,6 @@ function formatDateTime(value: string | undefined): string {
   });
 }
 
-function getDefaultScanPath(osType: OSType): string {
-  if (osType === "windows") return "C:\\";
-  return "/";
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -280,6 +281,39 @@ export default function DeviceFilesystemTab({
   onOpenFiles,
 }: DeviceFilesystemTabProps) {
   const { t } = useTranslation("devices");
+  const {
+    volumes,
+    loading: volumesLoading,
+    error: volumesError,
+    reload: reloadVolumes,
+  } = useFilesystemVolumes(deviceId);
+  // Seed with the OS root so the tab still works if the volumes call fails.
+  const [selectedScanPath, setSelectedScanPath] = useState<string>(() => osRootScanPath(osType));
+
+  // Each selection has its own identity, including switching away and back.
+  // Async work may finish after abort, so check ownership before updating UI.
+  const selection = useMemo(() => ({ deviceId, scanPath: selectedScanPath }), [deviceId, selectedScanPath]);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+
+  // Keep the selection when offered; otherwise use the OS volume or first chip.
+  useEffect(() => {
+    if (volumes.length === 0) return;
+    if (volumes.some((volume) => volume.scanPath === selectedScanPath)) return;
+    const osVolume = volumes.find((volume) => volume.isOsRoot) ?? volumes[0]!;
+    setSelectedScanPath(osVolume.scanPath);
+  }, [volumes, selectedScanPath]);
+
+  // Clear the previous volume's data while loadAll fetches the new selection.
+  useEffect(() => {
+    setCleanupPreview(null);
+    setSnapshot(null);
+    setScanCommand(null);
+    setActionLoading(null);
+    setRefreshing(false);
+    setError(undefined);
+    pollAbortRef.current?.abort();
+  }, [selection]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<"scan" | "preview" | null>(
@@ -305,6 +339,11 @@ export default function DeviceFilesystemTab({
     };
   }, []);
 
+  const isCurrentSelection = useCallback(
+    () => mountedRef.current && selectionRef.current === selection,
+    [selection],
+  );
+
   const [thresholdEvents, setThresholdEvents] = useState<ThresholdEvent[]>([]);
   const [scanCommand, setScanCommand] = useState<{
     id: string;
@@ -312,7 +351,9 @@ export default function DeviceFilesystemTab({
   } | null>(null);
 
   const fetchSnapshot = useCallback(async () => {
-    const response = await fetchWithAuth(`/devices/${deviceId}/filesystem`);
+    const response = await fetchWithAuth(
+      `/devices/${deviceId}/filesystem?path=${encodeURIComponent(selectedScanPath)}`,
+    );
     if (response.status === 404) {
       return null;
     }
@@ -322,11 +363,11 @@ export default function DeviceFilesystemTab({
         .catch(() => ({
           error: t("deviceFilesystemTab.failedToFetchFilesystemStatus"),
         }));
-      throw new Error(body.error || "Failed to fetch filesystem status");
+      throw new Error(body.error || t("deviceFilesystemTab.failedToFetchFilesystemStatus"));
     }
     const body = await response.json();
     return (body.data ?? null) as FilesystemSnapshot | null;
-  }, [deviceId, t]);
+  }, [deviceId, selectedScanPath, t]);
 
   const fetchThresholdEvents = useCallback(async () => {
     const response = await fetchWithAuth(
@@ -356,21 +397,23 @@ export default function DeviceFilesystemTab({
           fetchSnapshot(),
           fetchThresholdEvents(),
         ]);
+        if (!isCurrentSelection()) return;
         setSnapshot(latestSnapshot);
         setThresholdEvents(events);
       } catch (err) {
+        if (!isCurrentSelection()) return;
         setError(
           err instanceof Error
             ? err.message
             : t("deviceFilesystemTab.failedToLoadFilesystemStatus"),
         );
       } finally {
-        if (!silent) {
+        if (!silent && isCurrentSelection()) {
           setLoading(false);
         }
       }
     },
-    [fetchSnapshot, fetchThresholdEvents, t],
+    [fetchSnapshot, fetchThresholdEvents, isCurrentSelection, t],
   );
 
   const pollScanCommand = useCallback(
@@ -400,6 +443,7 @@ export default function DeviceFilesystemTab({
         }
 
         const body = await response.json();
+        if (signal.aborted || !isCurrentSelection()) return;
         const command = (body.data ?? null) as CommandDetail | null;
         if (!command) {
           throw new Error(t("deviceFilesystemTab.scanCommandNotFound"));
@@ -438,7 +482,7 @@ export default function DeviceFilesystemTab({
       if (signal.aborted) return;
       throw new Error(t("deviceFilesystemTab.scanStillRunning"));
     },
-    [deviceId, t],
+    [deviceId, isCurrentSelection, t],
   );
 
   useEffect(() => {
@@ -461,7 +505,7 @@ export default function DeviceFilesystemTab({
           fetchWithAuth(`/devices/${deviceId}/filesystem/scan`, {
             method: "POST",
             body: JSON.stringify({
-              path: getDefaultScanPath(osType),
+              path: selectedScanPath,
               maxDepth: 32,
               topFiles: 50,
               topDirs: 30,
@@ -474,6 +518,7 @@ export default function DeviceFilesystemTab({
         onUnauthorized: UNAUTHORIZED,
       });
 
+      if (controller.signal.aborted || !isCurrentSelection()) return;
       const commandId =
         typeof body?.data?.commandId === "string" ? body.data.commandId : null;
       if (!commandId) {
@@ -486,12 +531,13 @@ export default function DeviceFilesystemTab({
         Math.max(120_000, (timeoutSeconds + 90) * 1000),
         controller.signal,
       );
-      if (controller.signal.aborted || !mountedRef.current) return;
+      if (controller.signal.aborted || !isCurrentSelection()) return;
       setCleanupPreview(null);
-      await loadAll(true);
+      await Promise.all([loadAll(true), reloadVolumes()]);
+      if (!isCurrentSelection()) return;
       setScanCommand(null);
     } catch (err) {
-      if (controller.signal.aborted || !mountedRef.current) return;
+      if (controller.signal.aborted || !isCurrentSelection()) return;
       handleActionError(err, t("deviceFilesystemTab.filesystemScanFailed"));
       setError(
         err instanceof Error
@@ -500,9 +546,9 @@ export default function DeviceFilesystemTab({
       );
       setScanCommand(null);
     } finally {
-      if (mountedRef.current) setActionLoading(null);
+      if (isCurrentSelection()) setActionLoading(null);
     }
-  }, [deviceId, loadAll, osType, pollScanCommand, t]);
+  }, [deviceId, isCurrentSelection, loadAll, selectedScanPath, pollScanCommand, reloadVolumes, t]);
 
   const runCleanupPreview = useCallback(async () => {
     setActionLoading("preview");
@@ -512,15 +558,15 @@ export default function DeviceFilesystemTab({
         request: () =>
           fetchWithAuth(`/devices/${deviceId}/filesystem/cleanup-preview`, {
             method: "POST",
-            body: JSON.stringify({}),
+            body: JSON.stringify({ path: selectedScanPath }),
           }),
         errorFallback: t("deviceFilesystemTab.cleanupPreviewFailed"),
         onUnauthorized: UNAUTHORIZED,
       });
-      if (!mountedRef.current) return;
+      if (!isCurrentSelection()) return;
       setCleanupPreview((body?.data ?? null) as FilesystemCleanupPreview | null);
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!isCurrentSelection()) return;
       handleActionError(err, t("deviceFilesystemTab.cleanupPreviewFailed"));
       setError(
         err instanceof Error
@@ -528,9 +574,9 @@ export default function DeviceFilesystemTab({
           : t("deviceFilesystemTab.cleanupPreviewFailed"),
       );
     } finally {
-      if (mountedRef.current) setActionLoading(null);
+      if (isCurrentSelection()) setActionLoading(null);
     }
-  }, [deviceId, t]);
+  }, [deviceId, isCurrentSelection, selectedScanPath, t]);
 
   // Bring the preview panel into view once it renders. Optional-chain the
   // method so jsdom (no scrollIntoView impl) doesn't throw in tests.
@@ -621,7 +667,7 @@ export default function DeviceFilesystemTab({
               onClick={async () => {
                 setRefreshing(true);
                 await loadAll(true);
-                setRefreshing(false);
+                if (isCurrentSelection()) setRefreshing(false);
               }}
               disabled={refreshing}
               className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
@@ -640,6 +686,16 @@ export default function DeviceFilesystemTab({
               {t("deviceFilesystemTab.openFileManager")}{" "}
             </button>
           </div>
+        </div>
+
+        <div className="mt-4">
+          <VolumePicker
+            volumes={volumes}
+            selectedScanPath={selectedScanPath}
+            onSelect={setSelectedScanPath}
+            loading={volumesLoading}
+            error={volumesError}
+          />
         </div>
 
         {error && (
