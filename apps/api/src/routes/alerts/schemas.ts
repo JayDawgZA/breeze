@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { escalationStepsSchema } from '../../services/delivery/escalationSteps';
+export { escalationStepSchema, escalationStepsSchema, type EscalationStep } from '../../services/delivery/escalationSteps';
 import { NOTIFICATION_CHANNEL_TYPES } from '@breeze/shared';
 
 // Alert Rules schemas
@@ -182,10 +184,10 @@ export const createPolicySchema = z.object({
   // 'partner' creates a partner-wide ("all orgs") escalation policy (#2130).
   ownerScope: z.enum(['organization', 'partner']).optional(),
   name: z.string().min(1).max(255),
-  steps: z.any() // JSONB for escalation steps
+  steps: escalationStepsSchema
 });
 
 export const updatePolicySchema = z.object({
   name: z.string().min(1).max(255).optional(),
-  steps: z.any().optional()
+  steps: escalationStepsSchema.optional()
 });
