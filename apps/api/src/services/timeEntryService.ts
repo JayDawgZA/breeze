@@ -8,6 +8,7 @@ import { resolveBillingRule, type BillingRule } from './billingRuleResolver';
 import { getActiveWorkType } from './workTypeService';
 import { computeBillableMinutes, billableMinutesSql } from './billableMinutes';
 import { readOrgStampingDefaults } from './orgCurrencyCore';
+import { isMissingRateGap } from './invoiceAssembly';
 import { CURRENCY_CODES, isZeroDecimal, isRepresentableInCurrency, minorUnitExponent, roundToCurrency, multiplyToCurrency, toMinorUnits, fromMinorUnits } from '@breeze/shared';
 import type { CreateTimeEntryInput, UpdateTimeEntryInput, TicketPartInput, BillingStatus, TimeEntrySource } from '@breeze/shared';
 
@@ -1508,7 +1509,20 @@ interface BillableRowBase {
   technician: string | null;
   quantity: string;       // hours for time rows, qty for parts
   rate: string | null;    // hourly rate / unit price
-  amount: string;
+  /** Null when `missingRate` is true — an unresolved rate is reported as an
+   *  explicit gap, never a fabricated '0.00' line (#6461). */
+  amount: string | null;
+  /** True for a TIME row with no resolvable hourly rate, for ANY billing
+   *  status except `contract`/`no_charge` (those are an intentional zero,
+   *  never a gap) — see invoiceAssembly.isMissingRateGap, the same predicate
+   *  invoiceAssembly.partitionTimeEntries uses to route the identical
+   *  `not_billed` row to its `missingRate` bucket instead of a line. Unlike
+   *  partitionTimeEntries (which only ever sees `not_billed` rows), this
+   *  export sees every billing_status, so a `billed` row can be a gap too:
+   *  no resolvable rate means no amount to report or sum, regardless of
+   *  whether it was previously marked billed. Ticket parts have no gap
+   *  concept (`ticket_parts.unit_price` is NOT NULL) and are always false. */
+  missingRate: boolean;
   currencyCode: string | null;
   billingStatus: BillingStatus;
 }
@@ -1609,6 +1623,12 @@ export async function listBillables(
     // with no card terms — bill the actual duration.
     const hours = (((r.billableMinutes ?? r.minutes) ?? 0) / 60).toFixed(2);
     const rate = toFinite(r.rate);
+    // A row with no resolvable rate is a genuine assembly gap (#6461),
+    // regardless of billing_status, EXCEPT `contract`/`no_charge` where a
+    // null rate is an intentional zero — includes `billed` rows: a
+    // previously-billed entry that has since lost its rate (or never had a
+    // resolvable one) still has no amount to report or sum.
+    const missingRate = isMissingRateGap(rate, r.billingStatus);
     rows.push({
       kind: 'time',
       date: r.date,
@@ -1621,10 +1641,14 @@ export async function listBillables(
       // Labor rule (one rule everywhere): hours to 2 dp first, then ONE exact
       // half-up round of the product at the snapshot currency's minor unit
       // (review #2 — never through a double). Standalone entries with no
-      // currency fall back to the 2-decimal exponent.
-      amount: rate != null
-        ? multiplyToCurrency(hours, rate, r.currencyCode ?? 'USD')
-        : '0.00',
+      // currency fall back to the 2-decimal exponent. Never a fabricated
+      // '0.00' for a missingRate gap — null instead (#6461).
+      amount: missingRate
+        ? null
+        : rate != null
+          ? multiplyToCurrency(hours, rate, r.currencyCode ?? 'USD')
+          : '0.00',
+      missingRate,
       currencyCode: r.currencyCode,
       billingStatus: r.billingStatus,
       isApproved: r.isApproved
@@ -1642,9 +1666,13 @@ export async function listBillables(
       technician: r.technician,
       quantity: r.quantity,
       rate: r.unitPrice,
+      // ticket_parts.unit_price/quantity are NOT NULL — this branch is only
+      // the corrupt-numeric-string defensive fallback (toFinite already
+      // logged it), never a real gap, so parts have no missingRate concept.
       amount: quantity != null && unitPrice != null
         ? multiplyToCurrency(quantity, unitPrice, r.currencyCode ?? 'USD')
         : '0.00',
+      missingRate: false,
       currencyCode: r.currencyCode,
       billingStatus: r.billingStatus,
       isApproved: null
@@ -1652,9 +1680,11 @@ export async function listBillables(
   }
   rows.sort((a, b) => a.date.getTime() - b.date.getTime());
   // Sum as integer minor units — never float-add 2-dp strings and re-round.
+  // A missingRate gap contributes no money at all, not even a zero entry
+  // under its currency (#6461) — it has no amount to sum.
   const totals = new Map<string, number>();
   for (const r of rows) {
-    if (r.currencyCode == null) continue;
+    if (r.currencyCode == null || r.missingRate || r.amount == null) continue;
     totals.set(r.currencyCode, (totals.get(r.currencyCode) ?? 0) + toMinorUnits(r.amount, r.currencyCode));
   }
   const totalsByCurrency: CurrencyAmount[] = [...totals].map(([currencyCode, minor]) => ({
