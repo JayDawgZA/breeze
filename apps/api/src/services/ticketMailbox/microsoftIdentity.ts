@@ -34,6 +34,16 @@ const ACCEPTED_ADMIN_ROLES = new Set([
   PRIVILEGED_ROLE_ADMIN_ROLE_ID,
 ]);
 
+/**
+ * Every identity failure surfaces to callers as one sanitized error. This
+ * names which check failed, server-side only, so an operator can tell a
+ * nonce mismatch from a bad signature from a token-endpoint 400. It never
+ * carries token, code, or response-body content.
+ */
+function logIdentityCheckFailure(check: string, extra: { status?: number } = {}): void {
+  console.warn('[ticketMailbox] Microsoft identity check failed', { check, ...extra });
+}
+
 let cachedMicrosoftJwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 
 function normalizeGuid(value: unknown): string | null {
@@ -69,7 +79,7 @@ export function buildMicrosoftAuthorizationUrl(input: {
   url.searchParams.set('redirect_uri', input.redirectUri);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('response_mode', 'query');
-  // Directory.Read.All (delegated) lets verifyMailboxConsentAdminRole fall back
+  // Directory.Read.All (delegated) lets checkMailboxConsentAdminRoleViaGraph fall back
   // to a live Graph directory-role lookup when the `wids` ID token claim is
   // absent. Must also be added as a Delegated permission on the app
   // registration and admin-consented, or the live check will 403.
@@ -107,7 +117,10 @@ export async function exchangeMicrosoftAuthorizationCode(input: {
       body: body.toString(),
       redirect: 'error',
     });
-    if (!response.ok) throw new MicrosoftIdentityVerificationError('Microsoft identity verification failed');
+    if (!response.ok) {
+      logIdentityCheckFailure('token_exchange_http', { status: response.status });
+      throw new MicrosoftIdentityVerificationError('Microsoft identity verification failed');
+    }
 
     const tokenResponse: unknown = await response.json();
     const record = typeof tokenResponse === 'object' && tokenResponse !== null
@@ -115,6 +128,7 @@ export async function exchangeMicrosoftAuthorizationCode(input: {
       : undefined;
     const idToken = record?.id_token;
     if (typeof idToken !== 'string' || idToken.length === 0) {
+      logIdentityCheckFailure('token_exchange_missing_id_token');
       throw new MicrosoftIdentityVerificationError('Microsoft identity verification failed');
     }
     // Optional: only used for the live directory-role fallback below. Its
@@ -127,6 +141,7 @@ export async function exchangeMicrosoftAuthorizationCode(input: {
     return { idToken, accessToken };
   } catch (error) {
     if (error instanceof MicrosoftIdentityVerificationError) throw error;
+    logIdentityCheckFailure('token_exchange_request');
     throw new MicrosoftIdentityVerificationError('Microsoft identity verification failed');
   }
 }
@@ -150,12 +165,19 @@ export async function verifyMicrosoftAdminIdToken(
       : await jwtVerify(idToken, getMicrosoftJwks(), verifyOptions);
     payload = verified.payload;
   } catch {
+    logIdentityCheckFailure('id_token_jwt');
     throw new MicrosoftIdentityVerificationError('Microsoft identity verification failed');
   }
 
   const tid = normalizeGuid(payload.tid);
-  if (!tid) throw new MicrosoftIdentityVerificationError('Microsoft identity verification failed');
-  if (tid !== expectedTenant) throw new MicrosoftIdentityVerificationError('Microsoft tenant mismatch');
+  if (!tid) {
+    logIdentityCheckFailure('id_token_tid');
+    throw new MicrosoftIdentityVerificationError('Microsoft identity verification failed');
+  }
+  if (tid !== expectedTenant) {
+    logIdentityCheckFailure('id_token_tenant_mismatch');
+    throw new MicrosoftIdentityVerificationError('Microsoft tenant mismatch');
+  }
 
   const oid = normalizeGuid(payload.oid);
   const expectedIssuer = `${MICROSOFT_LOGIN_ORIGIN}/${tid}/v2.0`;
@@ -164,18 +186,18 @@ export async function verifyMicrosoftAdminIdToken(
   // (observed against a from-scratch app registration, verified with
   // Microsoft's own jwt.ms token inspector — see the linked GitHub issue).
   // Admin-role verification for mailbox consent now happens one level up in
-  // hasMailboxConsentAdminRole / hasMailboxConsentAdminRoleViaGraph, which
+  // hasMailboxConsentAdminRole / checkMailboxConsentAdminRoleViaGraph, which
   // treats wids as a fast path and falls back to a live Graph role lookup.
   const wids = Array.isArray(payload.wids) && payload.wids.every((wid) => typeof wid === 'string')
     ? payload.wids
     : [];
-  if (
-    !oid
-    || payload.iss !== expectedIssuer
-    || payload.nonce !== expected.nonce
-    || typeof payload.sub !== 'string'
-    || payload.sub.length === 0
-  ) {
+  const failedCheck = !oid ? 'oid'
+    : payload.iss !== expectedIssuer ? 'issuer'
+      : payload.nonce !== expected.nonce ? 'nonce'
+        : typeof payload.sub !== 'string' || payload.sub.length === 0 ? 'sub'
+          : null;
+  if (failedCheck || !oid || typeof payload.sub !== 'string') {
+    logIdentityCheckFailure(failedCheck ?? 'claims');
     throw new MicrosoftIdentityVerificationError('Microsoft identity verification failed');
   }
 
@@ -191,44 +213,121 @@ export function hasMailboxConsentAdminRole(wids: readonly string[]): boolean {
   return wids.some((wid) => ACCEPTED_ADMIN_ROLES.has(wid.toLowerCase()));
 }
 
+export type GraphAdminRoleCheckFailure =
+  | 'no_access_token'
+  | 'graph_request_failed'
+  | 'graph_http_error'
+  | 'graph_malformed_response'
+  | 'principal_mismatch'
+  | 'tenant_mismatch'
+  | 'no_accepted_role';
+
+export type GraphAdminRoleCheckResult =
+  | { ok: true }
+  | { ok: false; reason: GraphAdminRoleCheckFailure; status?: number };
+
+const GRAPH_ORIGIN = 'https://graph.microsoft.com';
+const GRAPH_ME_URL = `${GRAPH_ORIGIN}/v1.0/me?$select=id`;
+const GRAPH_ORGANIZATION_URL = `${GRAPH_ORIGIN}/v1.0/organization?$select=id`;
+const GRAPH_DIRECTORY_ROLES_URL =
+  `${GRAPH_ORIGIN}/v1.0/me/transitiveMemberOf/microsoft.graph.directoryRole?$select=roleTemplateId`;
+const MAX_DIRECTORY_ROLE_PAGES = 5;
+
+class GraphCheckFailure extends Error {
+  constructor(readonly reason: GraphAdminRoleCheckFailure, readonly status?: number) {
+    super(reason);
+  }
+}
+
 /**
  * Fallback for tenants where the `wids` ID token claim is not populated even
  * with optionalClaims.idToken correctly configured on the app registration.
  * Reads the signed-in user's directory role membership directly from Graph
  * using the delegated access token from the same authorization-code
  * exchange. Requires the Directory.Read.All delegated permission to be
- * granted (admin-consented) on the app registration — a 401/403 here is
- * treated as "not an admin" rather than a hard failure, since an
- * unconfigured permission should not be indistinguishable from a real
- * privilege-escalation attempt in the audit log, but also must never be
- * treated as success.
+ * granted (admin-consented) on the app registration.
+ *
+ * The result is bound to the verified ID token: Graph must report the token's
+ * principal as `expected.oid` and its home tenant as `expected.tid` before any
+ * role is considered, so a delegated token for a different user or tenant can
+ * never satisfy the check. Every failure (missing token, HTTP error, network
+ * error, malformed body, binding mismatch, no accepted role) resolves to
+ * `ok: false` with a reason for server-side diagnostics — never to success,
+ * and never by throwing. The reason carries no token or response content.
  */
-export async function hasMailboxConsentAdminRoleViaGraph(
+export async function checkMailboxConsentAdminRoleViaGraph(
   accessToken: string | null,
+  expected: { tid: string; oid: string },
   dependencies: Pick<MicrosoftIdentityDependencies, 'fetch'> = {},
-): Promise<boolean> {
-  if (!accessToken) return false;
+): Promise<GraphAdminRoleCheckResult> {
+  if (!accessToken) return { ok: false, reason: 'no_access_token' };
+  const fetchImpl = dependencies.fetch ?? globalThis.fetch;
+
+  const getJson = async (url: string): Promise<Record<string, unknown>> => {
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        headers: { authorization: `Bearer ${accessToken}` },
+        redirect: 'error',
+      });
+    } catch {
+      throw new GraphCheckFailure('graph_request_failed');
+    }
+    if (!response.ok) throw new GraphCheckFailure('graph_http_error', response.status);
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new GraphCheckFailure('graph_malformed_response');
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      throw new GraphCheckFailure('graph_malformed_response');
+    }
+    return body as Record<string, unknown>;
+  };
+
   try {
-    const response = await (dependencies.fetch ?? globalThis.fetch)(
-      'https://graph.microsoft.com/v1.0/me/transitiveMemberOf/microsoft.graph.directoryRole?$select=roleTemplateId',
-      { headers: { authorization: `Bearer ${accessToken}` } },
-    );
-    if (!response.ok) return false;
+    const me = await getJson(GRAPH_ME_URL);
+    if (normalizeGuid(me.id) !== normalizeGuid(expected.oid)) {
+      return { ok: false, reason: 'principal_mismatch' };
+    }
 
-    const body: unknown = await response.json();
-    const values = typeof body === 'object' && body !== null
-      ? (body as Record<string, unknown>).value
-      : undefined;
-    if (!Array.isArray(values)) return false;
+    const organization = await getJson(GRAPH_ORGANIZATION_URL);
+    const tenants = Array.isArray(organization.value) ? organization.value : [];
+    const tenantIds = tenants.map((org) => (
+      typeof org === 'object' && org !== null ? normalizeGuid((org as Record<string, unknown>).id) : null
+    ));
+    if (tenantIds.length !== 1 || tenantIds[0] === null || tenantIds[0] !== normalizeGuid(expected.tid)) {
+      return { ok: false, reason: 'tenant_mismatch' };
+    }
 
-    const roleTemplateIds = values
-      .map((role) => (typeof role === 'object' && role !== null
-        ? (role as Record<string, unknown>).roleTemplateId
-        : undefined))
-      .filter((id): id is string => typeof id === 'string');
+    let url: string | null = GRAPH_DIRECTORY_ROLES_URL;
+    for (let page = 0; url && page < MAX_DIRECTORY_ROLE_PAGES; page += 1) {
+      const body = await getJson(url);
+      if (!Array.isArray(body.value)) return { ok: false, reason: 'graph_malformed_response' };
+      const roleTemplateIds = body.value
+        .map((role) => (typeof role === 'object' && role !== null
+          ? (role as Record<string, unknown>).roleTemplateId
+          : undefined))
+        .filter((id): id is string => typeof id === 'string');
+      if (hasMailboxConsentAdminRole(roleTemplateIds)) return { ok: true };
 
-    return hasMailboxConsentAdminRole(roleTemplateIds);
-  } catch {
-    return false;
+      const nextLink = body['@odata.nextLink'];
+      if (nextLink === undefined) {
+        url = null;
+      } else if (typeof nextLink === 'string' && nextLink.startsWith(`${GRAPH_ORIGIN}/`)) {
+        url = nextLink;
+      } else {
+        return { ok: false, reason: 'graph_malformed_response' };
+      }
+    }
+    return { ok: false, reason: 'no_accepted_role' };
+  } catch (error) {
+    if (error instanceof GraphCheckFailure) {
+      return error.status === undefined
+        ? { ok: false, reason: error.reason }
+        : { ok: false, reason: error.reason, status: error.status };
+    }
+    return { ok: false, reason: 'graph_request_failed' };
   }
 }

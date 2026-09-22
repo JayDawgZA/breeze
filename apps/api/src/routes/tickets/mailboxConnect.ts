@@ -45,7 +45,7 @@ import {
   buildMicrosoftAuthorizationUrl,
   exchangeMicrosoftAuthorizationCode,
   hasMailboxConsentAdminRole,
-  hasMailboxConsentAdminRoleViaGraph,
+  checkMailboxConsentAdminRoleViaGraph,
   verifyMicrosoftAdminIdToken,
 } from '../../services/ticketMailbox/microsoftIdentity';
 import {
@@ -481,9 +481,26 @@ mailboxRoutes.get('/callback', zValidator('query', callbackQuery), async (c) => 
     // it. Fallback: a live Graph directory-role lookup using the delegated
     // access token from the same exchange, for tenants where wids is absent
     // despite correct optionalClaims.idToken configuration.
-    const isAdmin = hasMailboxConsentAdminRole(claims.wids)
-      || await hasMailboxConsentAdminRoleViaGraph(exchanged.accessToken);
-    if (!isAdmin) return fail('insufficient_role');
+    // The Graph check is bound to the ID token's oid + tid, so a delegated
+    // token for any other principal or tenant can never satisfy it.
+    if (!hasMailboxConsentAdminRole(claims.wids)) {
+      const graphCheck = await checkMailboxConsentAdminRoleViaGraph(
+        exchanged.accessToken,
+        { tid: claims.tid, oid: claims.oid },
+      );
+      if (!graphCheck.ok) {
+        // Server-side only; the user sees the unchanged insufficient_role
+        // outcome. Names which check failed, never token or Graph content.
+        console.warn('[ticketMailbox] consent admin-role check failed', {
+          connectionId: session.connectionId,
+          widsPresent: claims.wids.length > 0,
+          widsAdminRole: false,
+          graphCheck: graphCheck.reason,
+          ...(graphCheck.status !== undefined ? { graphStatus: graphCheck.status } : {}),
+        });
+        return fail('insufficient_role');
+      }
+    }
 
     const probe = await probeMailbox(claims.tid, connection.mailboxAddress);
     if (!probe.ok) {
