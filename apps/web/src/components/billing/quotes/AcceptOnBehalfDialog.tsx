@@ -11,6 +11,32 @@ import { type Quote, type QuoteLine, formatMoney } from './quoteTypes';
 
 const UNAUTHORIZED = () => void navigateTo('/login', { replace: true });
 
+/** Parses the variable names out of a 422 CONTRACT_VARIABLES_UNRESOLVED message
+ *  ("Contract variables unresolved: a, b") — the same message shape
+ *  `assertQuoteSendGates` (`quoteLifecycle.ts`) has always thrown for both a
+ *  real Send and this accept-on-behalf path (#6637).
+ *
+ *  Unlike `QuoteEditor`'s `unresolvedNamesFromMessage` (which filters a
+ *  known-variable list gathered from the template being attached, because
+ *  that call site has one to hand), this dialog has no such list — the
+ *  message IS the only source of the names — so it parses the suffix
+ *  directly instead of duplicating that filtering approach for no reason.
+ *
+ *  This depends on the RAW server message reaching the `friendly` hook below
+ *  unmangled. `runAction` overwrites `message` with an `errors:<CODE>` i18n
+ *  translation BEFORE calling `friendly()`, whenever such a key exists — so
+ *  if `errors:CONTRACT_VARIABLES_UNRESOLVED` is ever added to a locale (e.g.
+ *  for some other caller of that code), this parser would silently stop
+ *  finding the marker and fall back to the generic copy, losing the
+ *  variable-name list with no error anywhere. Don't add that key without
+ *  updating this parser too. */
+function unresolvedVariableNamesFromMessage(message: string): string[] {
+  const marker = 'Contract variables unresolved: ';
+  const idx = message.indexOf(marker);
+  if (idx === -1) return [];
+  return message.slice(idx + marker.length).split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -89,6 +115,24 @@ export default function AcceptOnBehalfDialog({ open, onClose, quote, lines, reci
           signerEmail: signerEmail.trim() || null,
         }),
         errorFallback: t('quotes.actions.acceptOnBehalf.error'),
+        // Accepting a draft on behalf runs the same send-time gates as a real
+        // Send (`assertQuoteSendGates`), so the exact same two codes can come
+        // back here: 422 CONTRACT_VARIABLES_UNRESOLVED and 409 DEPOSIT_INVALID
+        // (#6637). Without this, the dialog showed the server's raw English
+        // message verbatim — untranslated and, for the deposit case, phrased
+        // for a developer ("Cannot accept: …"). Both point the tech back at
+        // the quote editor, which is already visible on this same page once
+        // the dialog closes.
+        friendly: (code, message) => {
+          if (code === 'CONTRACT_VARIABLES_UNRESOLVED') {
+            const names = unresolvedVariableNamesFromMessage(message);
+            return names.length > 0
+              ? t('quotes.actions.acceptOnBehalf.errorContractVariablesUnresolved', { names: names.join(', ') })
+              : t('quotes.actions.acceptOnBehalf.errorContractVariablesUnresolvedGeneric');
+          }
+          if (code === 'DEPOSIT_INVALID') return t('quotes.actions.acceptOnBehalf.errorDepositInvalid');
+          return undefined;
+        },
         // `invoiceNumber` is the number the ACCEPT allocated. Never
         // `quote.quoteNumber`: that is the quote's own number, and naming it in
         // "Invoice … issued" tells the tech a document exists that does not.
