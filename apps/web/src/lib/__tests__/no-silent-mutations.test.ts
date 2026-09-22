@@ -205,6 +205,10 @@ const TARGET_GLOBS = [
   // routes through runAction (or a typed API wrapper), but these files were
   // never guarded, so a future bare mutation would ship with no CI signal.
   'src/components/billing/quotes/QuoteActions.tsx',
+  // Accept on behalf (spec 2026-09-21): the dialog lives in its own file
+  // because QuoteActions.tsx is already 1551 lines. It issues an invoice — a
+  // silent failure here is a tech who believes a deal is closed and is not.
+  'src/components/billing/quotes/AcceptOnBehalfDialog.tsx',
   'src/components/billing/quotes/QuoteDocument.tsx',
   // W03 moved these three into the /agreements area; ContractDocumentsSection
   // was deleted (contract detail now embeds SignedAgreementsPage).
@@ -735,7 +739,8 @@ describe('no silent mutations in targeted set', () => {
     // DR plan / BMR token create (#6495) adds DRPlanEditor.tsx and
     // RecoveryBootstrapTab.tsx: 155 → 157.
     // #6263 W01 adds SecurityScanManager.tsx, ThreatList.tsx, ThreatDetail.tsx: 157 → 160.
-    expect(absoluteFiles.length).toBe(160);
+    // Accept on behalf adds quotes/AcceptOnBehalfDialog.tsx: 160 → 161.
+    expect(absoluteFiles.length).toBe(161);
     for (const f of absoluteFiles) {
       expect(() => statSync(f)).not.toThrow();
     }
