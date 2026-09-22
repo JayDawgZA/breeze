@@ -498,6 +498,12 @@ mailboxRoutes.get('/callback', zValidator('query', callbackQuery), async (c) => 
           graphCheck: graphCheck.reason,
           ...(graphCheck.status !== undefined ? { graphStatus: graphCheck.status } : {}),
         });
+        // A genuine non-admin is a user outcome; anything else (missing
+        // Directory.Read.All consent, Graph outage, binding mismatch) is an
+        // operator problem that should alert.
+        if (graphCheck.reason !== 'no_accepted_role') {
+          captureException(new Error(`Mailbox consent admin-role check failed via Graph: ${graphCheck.reason}`), c);
+        }
         return fail('insufficient_role');
       }
     }

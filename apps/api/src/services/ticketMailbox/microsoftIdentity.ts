@@ -220,7 +220,8 @@ export type GraphAdminRoleCheckFailure =
   | 'graph_malformed_response'
   | 'principal_mismatch'
   | 'tenant_mismatch'
-  | 'no_accepted_role';
+  | 'no_accepted_role'
+  | 'role_page_limit';
 
 export type GraphAdminRoleCheckResult =
   | { ok: true }
@@ -302,7 +303,9 @@ export async function checkMailboxConsentAdminRoleViaGraph(
     }
 
     let url: string | null = GRAPH_DIRECTORY_ROLES_URL;
-    for (let page = 0; url && page < MAX_DIRECTORY_ROLE_PAGES; page += 1) {
+    for (let page = 0; url; page += 1) {
+      // Fail closed, but distinguishably: a truncated scan is not a verdict.
+      if (page >= MAX_DIRECTORY_ROLE_PAGES) return { ok: false, reason: 'role_page_limit' };
       const body = await getJson(url);
       if (!Array.isArray(body.value)) return { ok: false, reason: 'graph_malformed_response' };
       const roleTemplateIds = body.value

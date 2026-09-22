@@ -615,6 +615,7 @@ describe('M365 mailbox lifecycle routes', () => {
     expect(mocks.writeAuditEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       details: expect.objectContaining({ outcome: 'insufficient_role' }),
     }));
+    expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
   it('logs which admin-role check failed server-side, without token material', async () => {
@@ -632,6 +633,10 @@ describe('M365 mailbox lifecycle routes', () => {
       const logged = JSON.stringify(warn.mock.calls);
       expect(logged).not.toContain('delegated-access-token');
       expect(logged).not.toContain('verified-id-token');
+      expect(mocks.captureException).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Mailbox consent admin-role check failed via Graph: graph_http_error' }),
+        expect.anything(),
+      );
     } finally {
       warn.mockRestore();
     }

@@ -350,6 +350,14 @@ describe('checkMailboxConsentAdminRoleViaGraph', () => {
       .resolves.toEqual({ ok: true });
   });
 
+  it('reports a truncated role scan distinctly from a genuine non-admin', async () => {
+    const page = (n: number) => `https://graph.microsoft.com/v1.0/roles?page=${n}`;
+    const routes: Record<string, () => Response> = boundRoutes({ value: [], '@odata.nextLink': page(1) });
+    for (let n = 1; n <= 5; n += 1) routes[page(n)] = json({ value: [], '@odata.nextLink': page(n + 1) });
+    await expect(checkMailboxConsentAdminRoleViaGraph('delegated-token', EXPECTED, { fetch: graphFetch(routes) }))
+      .resolves.toEqual({ ok: false, reason: 'role_page_limit' });
+  });
+
   it('never follows a nextLink off the Graph origin', async () => {
     const fetchImpl = graphFetch(boundRoutes({
       value: [], '@odata.nextLink': 'https://evil.example.com/v1.0/roles',
