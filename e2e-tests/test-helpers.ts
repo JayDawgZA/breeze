@@ -6,7 +6,11 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Clear the per-user refresh-token rate limiter and revoked-JTI set in Redis.
+ * Clear the refresh-token rate limiter and revoked-JTI set in Redis.
+ *
+ * (The limiter is keyed per FAMILY, not per user — it moved off the user axis
+ * in #3696 because one wedged tab was starving the same person's other
+ * devices. The paragraph below depends on that distinction.)
  *
  * Why: every test context starts from the same shared `storageState` produced
  * by `globalSetup`. When a test triggers `/auth/refresh`, the API rotates the
@@ -17,6 +21,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * Pair with `test.describe.configure({ mode: 'serial' })` at the top of each
  * spec file — the `beforeEach` clear plus serial execution avoids inter-test
  * refresh races within a file.
+ *
+ * NOT a substitute for `E2E_MODE` on the stack (#6447). `refresh:fam:<fam>` is
+ * a per-FAMILY volume budget (60/60s) and `apps/web` is an Astro MPA that
+ * spends one `POST /auth/refresh` per full-page navigation, so a single
+ * navigation-heavy test — let alone four spec files running in parallel
+ * workers, all replaying the one shared storageState and therefore the one
+ * family — exhausts it mid-test, where a `beforeEach` can no longer help. The
+ * API stands the limiter down entirely under `E2E_MODE`, which
+ * `scripts/dev/wt-stack/env.ts` now pins on for every dev stack; this helper
+ * stays as the reset for a stack brought up without it.
  *
  * wt-stack aware: resolves the redis container the same way global-setup.ts
  * does (via the `E2E_STACK_FILE` descriptor's `project`), falling back to the
