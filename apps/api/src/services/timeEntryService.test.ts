@@ -2376,6 +2376,58 @@ describe('both stop paths land billable_minutes (#4628 W03)', () => {
     expect(dbMocks.updateSetArgs[0]).toMatchObject({ minimumMinutes: 90, billableMinutes: 90 });
   });
 
+  it('editing ONLY the hourly rate leaves a legacy entry\'s billed quantity alone (#6465)', async () => {
+    // Pre-feature row: 3 minutes worked, W02 back-stamped the card's rounding
+    // increment, billable_minutes NULL by design. A rate correction must not
+    // restamp the invoice quantity 0.05h -> 0.25h behind the technician's back.
+    dbMocks.selectResults.push([{
+      ...entry, durationMinutes: 3, minimumMinutes: null, billableMinutes: null,
+    }]);
+    dbMocks.updateResult = [entry];
+    await updateTimeEntry('te-1', { hourlyRate: 250 }, manager);
+    expect(dbMocks.updateSetArgs[0]).toHaveProperty('hourlyRate', '250.00');
+    expect(dbMocks.updateSetArgs[0]).not.toHaveProperty('billableMinutes');
+  });
+
+  it('re-sending the SAME minimum is not a term change, so the billed quantity stays put (#6465)', async () => {
+    dbMocks.selectResults.push([{ ...entry, durationMinutes: 3, billableMinutes: null }]);
+    dbMocks.updateResult = [entry];
+    await updateTimeEntry('te-1', { minimumMinutes: entry.minimumMinutes, hourlyRate: 250 }, manager);
+    expect(dbMocks.updateSetArgs[0]).not.toHaveProperty('billableMinutes');
+  });
+
+  it('clearing the minimum via isBillable:false still re-derives the billed quantity (#6465)', async () => {
+    dbMocks.selectResults.push([{ ...entry, durationMinutes: 3 }]);
+    dbMocks.updateResult = [entry];
+    await updateTimeEntry('te-1', { isBillable: false }, manager);
+    // 60-minute minimum gone, but the 15-minute increment still rounds 3 up.
+    expect(dbMocks.updateSetArgs[0]).toMatchObject({ minimumMinutes: null, billableMinutes: 15 });
+  });
+
+  it('a re-price that lands on the SAME terms does not restamp the billed quantity (#6465)', async () => {
+    // The reprice branch writes minimumMinutes/roundingIncrementMinutes through
+    // Object.assign(set, base) — a different write path from applyBillingInput's
+    // spread. The value gate has to hold there too: this card resolves to the
+    // terms the row already carries, so nothing should move.
+    dbMocks.selectResults.push([{ ...entry, durationMinutes: 3, billableMinutes: null }]);
+    dbMocks.updateResult = [entry];
+    await updateTimeEntry('te-1', { workTypeId: 'wt-onsite' }, tech);
+    expect(dbMocks.updateSetArgs[0]).toMatchObject({ minimumMinutes: 60, roundingIncrementMinutes: 15 });
+    expect(dbMocks.updateSetArgs[0]).not.toHaveProperty('billableMinutes');
+  });
+
+  it('an ALREADY-null minimum going non-billable is not a term change (#6465)', async () => {
+    // applyBillingInput nulls the minimum for non-billable work, but it was
+    // already null — coverage is not a card term, so the quantity stays put.
+    dbMocks.selectResults.push([{
+      ...entry, durationMinutes: 3, minimumMinutes: null, roundingIncrementMinutes: null,
+    }]);
+    dbMocks.updateResult = [entry];
+    await updateTimeEntry('te-1', { isBillable: false }, manager);
+    expect(dbMocks.updateSetArgs[0]).toMatchObject({ minimumMinutes: null });
+    expect(dbMocks.updateSetArgs[0]).not.toHaveProperty('billableMinutes');
+  });
+
   it('a billed entry cannot be re-timed, so its billed quantity can never move', async () => {
     dbMocks.selectResults.push([{ ...entry, billingStatus: 'billed' }]);
     await expect(updateTimeEntry('te-1', { endedAt: new Date('2026-03-03T10:20:00Z') }, manager))
